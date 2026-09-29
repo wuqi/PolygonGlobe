@@ -1,0 +1,31 @@
+:root {
+  --bg: #0b0e14;
+  --fg: #d7dde8;
+  --panel: #151a23;
+  --line: #2a3242;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
