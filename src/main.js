@@ -1,10 +1,10 @@
 import './style.css';
-import { createProjection, POLYHEDRA } from './geo/polyhedra.js';
+import { createProjection, STOCK } from './geo/stock.js';
 import { GlobeRenderer } from './render/renderer.js';
 
 const state = {
-  polyKey: 'cube',
-  rotate: [0, -30, 0],
+  polyKey: 'cubic',
+  rotate: null,
   zoom: 1,
   layers: {
     land: true,
@@ -30,15 +30,16 @@ const canvas = document.querySelector('#globe');
 const renderer = new GlobeRenderer(canvas);
 
 function buildProjection() {
-  const projection = createProjection(state.polyKey, { rotate: state.rotate });
-  projection.scale((projection.scale?.() || 150) * state.zoom);
+  const projection = createProjection(state.polyKey);
+  if (!state.rotate) state.rotate = projection.rotate();
+  projection.rotate(state.rotate);
   renderer.setProjection(projection);
   projection.scale(renderer.baseScale * state.zoom);
   projection.rotate(state.rotate);
 }
 
 const polyGroup = document.querySelector('#poly-group');
-for (const p of POLYHEDRA) {
+for (const p of STOCK) {
   const btn = document.createElement('button');
   btn.className = `btn${p.key === state.polyKey ? ' active' : ''}`;
   btn.textContent = `${p.name}`;
@@ -70,7 +71,7 @@ for (const [key, label] of [
 }
 
 document.querySelector('#reset').addEventListener('click', () => {
-  state.rotate = [0, -30, 0];
+  state.rotate = null;
   state.zoom = 1;
   buildProjection();
   draw();
