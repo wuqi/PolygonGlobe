@@ -197,6 +197,39 @@ function hullFaces(verts) {
   return faces;
 }
 
+function facePlanes(verts, faces) {
+  return faces.map((ring) => {
+    const center = ring.reduce((acc, i) => {
+      const v = normalize(verts[i]);
+      return [acc[0] + v[0], acc[1] + v[1], acc[2] + v[2]];
+    }, [0, 0, 0]);
+    const c = normalize(center);
+    const v0 = normalize(verts[ring[0]]);
+    const v1 = normalize(verts[ring[1]]);
+    const v2 = normalize(verts[ring[2]]);
+    let n = normalize(cross(sub(v1, v0), sub(v2, v0)));
+    if (dot(n, c) < 0) n = [-n[0], -n[1], -n[2]];
+    return { n, d: dot(n, c) };
+  });
+}
+
+function findFace(planes, lonDeg, latDeg) {
+  const lambda = lonDeg * Math.PI / 180;
+  const phi = latDeg * Math.PI / 180;
+  const cp = Math.cos(phi);
+  const p = [cp * Math.cos(lambda), cp * Math.sin(lambda), Math.sin(phi)];
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let i = 0; i < planes.length; i++) {
+    const s = dot(p, planes[i].n) - planes[i].d;
+    if (s > bestScore) {
+      bestScore = s;
+      best = i;
+    }
+  }
+  return best;
+}
+
 function buildParents(faces) {
   const edgeMap = new Map();
   faces.forEach((ring, fi) => {
@@ -283,7 +316,7 @@ export function buildPolygons(key) {
     if (ring.length < 3) throw new Error(`degenerate face in ${key}`);
   }
   const features = faces.map((ringIdx) => {
-    const ring = ringIdx.map((i) => lonLat(solid.verts[i]));
+    const ring = ringIdx.map((i) => lonLat(solid.verts[i])).reverse();
     const sum = ringIdx.reduce((acc, i) => {
       const v = normalize(solid.verts[i]);
       return [acc[0] + v[0], acc[1] + v[1], acc[2] + v[2]];
@@ -301,16 +334,19 @@ export function buildPolygons(key) {
     type: 'FeatureCollection',
     features,
     parents: buildParents(faces),
+    planes: facePlanes(solid.verts, faces),
     faceCount: faces.length,
   };
 }
 
 export function createProjection(key, { rotate = [0, -30, 0] } = {}) {
-  const { features, parents } = buildPolygons(key);
-  const projection = geoPolyhedralVoronoi(parents, {
-    type: 'FeatureCollection',
-    features,
-  });
+  const { features, parents, planes } = buildPolygons(key);
+  const projection = geoPolyhedralVoronoi(
+    parents,
+    { type: 'FeatureCollection', features },
+    undefined,
+    (lon, lat) => findFace(planes, lon, lat),
+  );
   projection.rotate(rotate);
   return projection;
 }
