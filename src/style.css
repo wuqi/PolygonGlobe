@@ -3,6 +3,9 @@
   --fg: #d7dde8;
   --panel: #151a23;
   --line: #2a3242;
+  --accent: #c2453a;
+  --btn: #1c2431;
+  --btn-hover: #253042;
 }
 
 * {
@@ -23,9 +26,73 @@ body {
   overflow: hidden;
 }
 
-.stage {
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  height: 100%;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn {
+  background: var(--btn);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--btn-hover);
+}
+
+.btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  color: #9fb0c6;
+}
+
+.check input {
+  accent-color: var(--accent);
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  cursor: grab;
+}
+
+.stage canvas.grabbing {
+  cursor: grabbing;
 }
