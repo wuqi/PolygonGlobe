@@ -1,11 +1,13 @@
 :root {
-  --bg: #0b0e14;
-  --fg: #d7dde8;
-  --panel: #151a23;
-  --line: #2a3242;
+  --bg: #0d1017;
+  --panel: #141923;
+  --panel-2: #1a212d;
+  --fg: #dbe2ee;
+  --muted: #8494ab;
+  --line: #263041;
   --accent: #c2453a;
   --btn: #1c2431;
-  --btn-hover: #253042;
+  --btn-hover: #26314500;
 }
 
 * {
@@ -28,27 +30,154 @@ body {
 
 #app {
   display: flex;
+}
+
+/* ---------- 侧栏 ---------- */
+.sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.brand {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand h1 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.brand p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.solid-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.solid {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.solid:hover {
+  background: var(--panel-2);
+}
+
+.solid.active {
+  background: #1d2735;
+  border-color: var(--accent);
+}
+
+.thumb {
+  width: 46px;
+  height: 60px;
+  flex: 0 0 46px;
+  background: #fff;
+  border-radius: 3px;
+  overflow: hidden;
+  display: block;
+  position: relative;
+}
+
+.thumb svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meta .name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.meta .en {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-foot .warn {
+  color: #e0a34a;
+}
+
+/* ---------- 主区 ---------- */
+.stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 18px;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: 8px 14px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
 
-.group {
+.grp {
   display: flex;
-  gap: 6px;
   align-items: center;
-  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.btn {
+.grp.right {
+  margin-left: auto;
+}
+
+.grp > label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.seg {
   background: var(--btn);
   color: var(--fg);
   border: 1px solid var(--line);
@@ -58,41 +187,87 @@ body {
   cursor: pointer;
 }
 
-.btn:hover {
-  background: var(--btn-hover);
+.seg:hover {
+  border-color: #3a465c;
 }
 
-.btn.active {
+.seg.on {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
 
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.btn {
+  background: var(--btn);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 14px;
+  font: inherit;
   cursor: pointer;
-  user-select: none;
-  color: #9fb0c6;
 }
 
-.check input {
+.btn:hover:not(:disabled) {
+  border-color: #3a465c;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.chk input {
   accent-color: var(--accent);
 }
 
-.stage {
-  position: relative;
+/* ---------- 预览 ---------- */
+.preview {
   flex: 1;
   min-height: 0;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    repeating-conic-gradient(#12161e 0% 25%, #171c26 0% 50%) 50% / 22px 22px;
+  overflow: auto;
 }
 
-.stage canvas {
-  position: absolute;
-  inset: 0;
-  cursor: grab;
+.preview svg {
+  max-width: 100%;
+  max-height: 100%;
+  height: 100%;
+  background: #fff;
+  box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5);
+  border-radius: 2px;
 }
 
-.stage canvas.grabbing {
-  cursor: grabbing;
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a3342;
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }

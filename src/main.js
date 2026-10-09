@@ -1,136 +1,239 @@
+// 纸质多面体地图 - 界面
+// 左侧多面体列表，右侧 A4/A5 版式实时预览，底部工具条导出。
+
 import './style.css';
-import { createProjection, STOCK } from './geo/stock.js';
-import { GlobeRenderer } from './render/renderer.js';
+import { SOLIDS } from './print/solids.js';
+import { renderNet } from './print/sheet.js';
 
 const state = {
-  polyKey: 'cubic',
-  rotate: null,
-  zoom: 1,
-  layers: {
-    land: true,
-    graticule: true,
-    china: true,
-    outline: true,
-  },
+  solid: 'cube',
+  page: 'A4',
+  style: 'color',
+  graticule: false,
 };
 
 const app = document.querySelector('#app');
 app.innerHTML = `
-  <header class="toolbar">
-    <div class="group" id="poly-group"></div>
-    <div class="group" id="layer-group"></div>
-    <button id="reset" class="btn">重置视角</button>
-  </header>
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>纸质多面体地图</h1>
+      <p>选择多面体，生成可打印的纸模展开图</p>
+    </div>
+    <div class="solid-list" id="solid-list"></div>
+    <div class="sidebar-foot">
+      <span id="stat"></span>
+    </div>
+  </aside>
+
   <main class="stage">
-    <canvas id="globe"></canvas>
+    <div class="toolbar">
+      <div class="grp">
+        <label>页面</label>
+        <button class="seg" data-page="A4">A4</button>
+        <button class="seg" data-page="A5">A5</button>
+      </div>
+      <div class="grp">
+        <label>样式</label>
+        <button class="seg" data-style="color">彩色</button>
+        <button class="seg" data-style="mono">单色</button>
+      </div>
+      <div class="grp">
+        <label class="chk"><input type="checkbox" id="grat"> 经纬网</label>
+      </div>
+      <div class="grp right">
+        <button class="btn" id="dl-png">导出 PNG</button>
+        <button class="btn" id="dl-svg">导出 SVG</button>
+        <button class="btn primary" id="dl-pdf">导出 PDF</button>
+      </div>
+    </div>
+    <div class="preview" id="preview"></div>
   </main>
 `;
 
-const canvas = document.querySelector('#globe');
-const renderer = new GlobeRenderer(canvas);
+const listEl = document.querySelector('#solid-list');
+const previewEl = document.querySelector('#preview');
+const statEl = document.querySelector('#stat');
 
-function buildProjection() {
-  const projection = createProjection(state.polyKey);
-  if (!state.rotate) state.rotate = projection.rotate();
-  projection.rotate(state.rotate);
-  renderer.setProjection(projection);
-  projection.scale(renderer.baseScale * state.zoom);
-  projection.rotate(state.rotate);
-}
-
-const polyGroup = document.querySelector('#poly-group');
-for (const p of STOCK) {
-  const btn = document.createElement('button');
-  btn.className = `btn${p.key === state.polyKey ? ' active' : ''}`;
-  btn.textContent = `${p.name}`;
-  btn.dataset.key = p.key;
-  btn.addEventListener('click', () => {
-    state.polyKey = p.key;
-    polyGroup.querySelectorAll('.btn').forEach((b) => b.classList.toggle('active', b.dataset.key === p.key));
-    buildProjection();
-    draw();
+// 多面体卡片
+for (const s of SOLIDS) {
+  const card = document.createElement('button');
+  card.className = 'solid';
+  card.dataset.key = s.key;
+  card.innerHTML = `
+    <span class="thumb" data-key="${s.key}"></span>
+    <span class="meta">
+      <span class="name">${s.name}</span>
+      <span class="en">${s.en}</span>
+    </span>`;
+  card.addEventListener('click', () => {
+    state.solid = s.key;
+    syncSelection();
+    render();
   });
-  polyGroup.appendChild(btn);
+  listEl.appendChild(card);
 }
 
-const layerGroup = document.querySelector('#layer-group');
-for (const [key, label] of [
-  ['land', '陆地'],
-  ['graticule', '经纬网'],
-  ['china', '中国'],
-  ['outline', '展开轮廓'],
-]) {
-  const labelEl = document.createElement('label');
-  labelEl.className = 'check';
-  labelEl.innerHTML = `<input type="checkbox" ${state.layers[key] ? 'checked' : ''}><span>${label}</span>`;
-  labelEl.querySelector('input').addEventListener('change', (e) => {
-    state.layers[key] = e.target.checked;
-    draw();
+// 工具条
+document.querySelectorAll('[data-page]').forEach((b) => {
+  b.addEventListener('click', () => {
+    state.page = b.dataset.page;
+    syncToolbar();
+    render();
   });
-  layerGroup.appendChild(labelEl);
-}
-
-document.querySelector('#reset').addEventListener('click', () => {
-  state.rotate = null;
-  state.zoom = 1;
-  buildProjection();
-  draw();
+});
+document.querySelectorAll('[data-style]').forEach((b) => {
+  b.addEventListener('click', () => {
+    state.style = b.dataset.style;
+    syncToolbar();
+    render();
+  });
+});
+document.querySelector('#grat').addEventListener('change', (e) => {
+  state.graticule = e.target.checked;
+  render();
 });
 
-function draw() {
-  renderer.draw({ layers: state.layers });
-}
-
-function resize() {
-  const stage = document.querySelector('.stage');
-  renderer.resize(stage.clientWidth, stage.clientHeight);
-  buildProjection();
-  draw();
-}
-
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-
-canvas.addEventListener('pointerdown', (e) => {
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  canvas.setPointerCapture(e.pointerId);
-  canvas.classList.add('grabbing');
+document.querySelector('#dl-svg').addEventListener('click', () => {
+  const { svg } = current();
+  download(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${state.solid}-${state.page}-${state.style}.svg`);
 });
 
-canvas.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  const dx = e.clientX - lastX;
-  const dy = e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  state.rotate = [
-    state.rotate[0] + dx * 0.3,
-    Math.max(-90, Math.min(90, state.rotate[1] + dy * 0.3)),
-  ];
-  renderer.projection.rotate(state.rotate);
-  draw();
+const dpi = Number(document.body.dataset.dpi || 150);
+
+document.querySelector('#dl-png').addEventListener('click', () => {
+  const { svg, W, H } = current();
+  const px = (mm) => Math.round((mm / 25.4) * dpi);
+  const w = px(W);
+  const h = px(H);
+  const img = new Image();
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  img.onload = () => {
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    URL.revokeObjectURL(url);
+    cv.toBlob((blob) => {
+      if (blob) download(blob, `${state.solid}-${state.page}-${state.style}-${dpi}dpi.png`);
+    }, 'image/png');
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert('PNG 导出失败');
+  };
+  img.src = url;
 });
 
-const endDrag = (e) => {
-  dragging = false;
-  canvas.classList.remove('grabbing');
-  if (e.pointerId !== undefined && canvas.hasPointerCapture?.(e.pointerId)) {
-    canvas.releasePointerCapture(e.pointerId);
+const pdfBtn = document.querySelector('#dl-pdf');
+pdfBtn.addEventListener('click', async () => {
+  pdfBtn.disabled = true;
+  const old = pdfBtn.textContent;
+  pdfBtn.textContent = '生成中…';
+  try {
+    const { svg, W, H } = current();
+    const { jsPDF } = await import('jspdf');
+    const { svg2pdf } = await import('svg2pdf.js');
+    const doc = new jsPDF({ unit: 'mm', format: [W, H], orientation: W > H ? 'landscape' : 'portrait' });
+    const el = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
+    await svg2pdf(el, doc, { x: 0, y: 0 });
+    doc.save(`${state.solid}-${state.page}-${state.style}.pdf`);
+  } catch (e) {
+    console.error(e);
+    alert(`PDF 导出失败：${e.message || e}`);
+  } finally {
+    pdfBtn.disabled = false;
+    pdfBtn.textContent = old;
   }
-};
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
+});
 
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  state.zoom = Math.max(0.4, Math.min(6, state.zoom * factor));
-  renderer.projection.scale(renderer.baseScale * state.zoom);
-  draw();
-}, { passive: false });
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
 
-window.addEventListener('resize', resize);
-resize();
+function solidOf() {
+  return SOLIDS.find((s) => s.key === state.solid);
+}
+
+let cached = null;
+let cacheKey = '';
+function current() {
+  const key = `${state.solid}|${state.page}|${state.style}|${state.graticule}`;
+  if (!cached || cacheKey !== key) {
+    cached = renderNet({ solid: solidOf(), page: state.page, style: state.style, graticule: state.graticule });
+    cacheKey = key;
+  }
+  return cached;
+}
+
+function render() {
+  previewEl.setAttribute('aria-busy', 'true');
+  const { svg, net } = current();
+  previewEl.innerHTML = svg;
+  statEl.innerHTML = `${net.faceCount} 面 · 折线 ${net.folds} · 剪线 ${net.cuts} · 比例 ${net.aspect.toFixed(2)}`;
+  statEl.className = net.overlaps ? 'warn' : '';
+  previewEl.removeAttribute('aria-busy');
+}
+
+function syncSelection() {
+  listEl.querySelectorAll('.solid').forEach((b) => {
+    b.classList.toggle('active', b.dataset.key === state.solid);
+  });
+}
+
+function syncToolbar() {
+  document.querySelectorAll('[data-page]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.page === state.page);
+  });
+  document.querySelectorAll('[data-style]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.style === state.style);
+  });
+}
+
+// 卡片缩略图：懒加载，且只画面的轮廓（不跑世界地图的 geoPath）
+async function paintThumb(el) {
+  const solid = SOLIDS.find((s) => s.key === el.dataset.key);
+  if (!solid) return;
+  try {
+    const { buildNet } = await import('./print/net.js');
+    const net = buildNet(solid);
+    const [b0, b1] = net.bbox;
+    const bw = b1[0] - b0[0];
+    const bh = b1[1] - b0[1];
+    const pad = bw * 0.04;
+    const vb = [b0[0] - pad, b0[1] - pad, bw + pad * 2, bh + pad * 2].map((v) => Math.round(v * 100) / 100);
+    const d = net.faces
+      .map((ring) => 'M' + ring.map((p) => `${Math.round(p[0] * 100) / 100},${Math.round(p[1] * 100) / 100}`).join('L') + 'Z')
+      .join(' ');
+    el.innerHTML =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb.join(' ')}" preserveAspectRatio="xMidYMid meet">` +
+      `<path d="${d}" fill="#dce7f2" stroke="#5b7ea6" stroke-width="0.04"/></svg>`;
+  } catch {
+    el.textContent = '!';
+  }
+}
+
+const io = new IntersectionObserver(
+  (entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      io.unobserve(e.target);
+      paintThumb(e.target);
+    }
+  },
+  { root: listEl, rootMargin: '120px' },
+);
+listEl.querySelectorAll('.thumb').forEach((el) => io.observe(el));
+
+syncSelection();
+syncToolbar();
+render();

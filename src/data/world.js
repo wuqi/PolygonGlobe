@@ -1,5 +1,5 @@
 import { geoArea } from 'd3-geo';
-import world from '@surbowl/world-geo-json-zh';
+import world from '@surbowl/world-geo-json-zh' with { type: 'json' };
 
 function fixRing(ring) {
   const area = geoArea({ type: 'Polygon', coordinates: [ring] });
