@@ -189,7 +189,7 @@ export function renderNet(opts) {
     dGrat ? `<path d="${dGrat}" fill="none" stroke="${c.grat}" stroke-width="${c.gratW}"/>` : '',
     `<path d="${dLand}" fill="${c.land}" stroke="${c.coast}" stroke-width="0.1"/>`,
     `<path d="${dChina}" fill="${c.china}" stroke="${c.coast}" stroke-width="0.12"/>`,
-    base === 'sky' ? skyLayers(geo, style) : '',
+    base === 'sky' ? skyLayers(geo, style, proj) : '',
     `</g>`,
     showFolds
       ? `<path d="${dFolds}" fill="none" stroke="${c.fold}" stroke-width="${c.foldW}" stroke-dasharray="1.2 0.8"/>`
@@ -204,7 +204,7 @@ export function renderNet(opts) {
 
 // Star map content, from d3-celestial's sample data.
 let skyData = null;
-function skyLayers(geo, style) {
+function skyLayers(geo, style, proj) {
   if (!skyData) return '';
   const mono = style === 'mono';
   const parts = [];
@@ -225,23 +225,31 @@ function skyLayers(geo, style) {
     const stars = skyData.stars.features;
     let dots = '';
     for (const f of stars) {
-      const p = geo(f);
+      // geoPath(f) returns an SVG path string, not coordinates, so read the
+      // projected point off the projection directly.
+      const p = proj(f.geometry.coordinates);
       if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
       const r = 0.16 + (5.5 - (f.properties?.mag ?? 5)) * 0.05;
-      dots += `M${p[0].toFixed(1)},${p[1].toFixed(1)}m${-r.toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(r * 2).toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(-r * 2).toFixed(2)},0`;
+      dots += `M${p[0].toFixed(1)},${p[1].toFixed(1)}m${(-r).toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(r * 2).toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(-r * 2).toFixed(2)},0`;
     }
-    parts.push(`<path d="${dots}" fill="${mono ? '#333333' : '#1b2436'}" fill-rule="evenodd"/>`);
+    if (dots) parts.push(`<path d="${dots}" fill="${mono ? '#333333' : '#1b2436'}" fill-rule="evenodd"/>`);
   }
   return parts.join('');
 }
 
 export async function loadSkyData() {
   if (skyData) return skyData;
+  // These live in src/data/sky, one level up from this module.
+  const fetchJson = (name) =>
+    fetch(new URL(`../data/sky/${name}`, import.meta.url)).then((r) => {
+      if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+      return r.json();
+    });
   const [mw, stars, clines, cbounds] = await Promise.all([
-    fetch(new URL('./data/sky/mw.json', import.meta.url)).then((r) => r.json()),
-    fetch(new URL('./data/sky/stars.6.json', import.meta.url)).then((r) => r.json()),
-    fetch(new URL('./data/sky/constellations.lines.json', import.meta.url)).then((r) => r.json()),
-    fetch(new URL('./data/sky/constellations.bounds.json', import.meta.url)).then((r) => r.json()),
+    fetchJson('mw.json'),
+    fetchJson('stars.6.json'),
+    fetchJson('constellations.lines.json'),
+    fetchJson('constellations.bounds.json'),
   ]);
   skyData = {
     mw,
