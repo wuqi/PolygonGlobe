@@ -20,6 +20,16 @@ const THEME = {
     foldW: 0.25,
     grat: '#1f4e79',
     gratW: 0.18,
+    mw: '#dce6f2',
+    consBound: '#9fb0c4',
+    consBoundW: 0.1,
+    consLine: '#3f5875',
+    consLineW: 0.14,
+    consName: '#5b6f88',
+    consNameSize: 1.1,
+    star: '#16233a',
+    starMax: 0.24,
+    starMin: 0.05,
     tabFill: '#ffffff',
     tab: '#7a8ea0',
     tabW: 0.2,
@@ -36,6 +46,16 @@ const THEME = {
     foldW: 0.25,
     grat: '#2b3f55',
     gratW: 0.2,
+    mw: '#eeeeee',
+    consBound: '#b4b4b4',
+    consBoundW: 0.1,
+    consLine: '#666666',
+    consLineW: 0.14,
+    consName: '#8c8c8c',
+    consNameSize: 1.1,
+    star: '#111111',
+    starMax: 0.24,
+    starMin: 0.05,
     tabFill: '#ffffff',
     tab: '#888888',
     tabW: 0.2,
@@ -56,6 +76,24 @@ export const THEME_KEYS = [
   ['fold', '折线'],
   ['cut', '剪切线'],
   ['tab', '贴边'],
+];
+
+// Star map colours; only meaningful when the base is 'sky'.
+export const SKY_KEYS = [
+  ['mw', '银河底色'],
+  ['consBound', '星座界'],
+  ['consLine', '星座连线'],
+  ['consName', '星座名'],
+  ['star', '星点'],
+];
+
+// Numeric sky settings get sliders rather than colour pickers.
+export const SKY_WIDTHS = [
+  ['consLineW', '连线宽'],
+  ['consBoundW', '星座界宽'],
+  ['consNameSize', '星座名字号'],
+  ['starMax', '亮星半径'],
+  ['starMin', '暗星半径'],
 ];
 
 export function themeOf(style) {
@@ -189,7 +227,7 @@ export function renderNet(opts) {
     dGrat ? `<path d="${dGrat}" fill="none" stroke="${c.grat}" stroke-width="${c.gratW}"/>` : '',
     `<path d="${dLand}" fill="${c.land}" stroke="${c.coast}" stroke-width="0.1"/>`,
     `<path d="${dChina}" fill="${c.china}" stroke="${c.coast}" stroke-width="0.12"/>`,
-    base === 'sky' ? skyLayers(geo, style, proj) : '',
+    base === 'sky' ? skyLayers(geo, style, proj, c) : '',
     `</g>`,
     showFolds
       ? `<path d="${dFolds}" fill="none" stroke="${c.fold}" stroke-width="${c.foldW}" stroke-dasharray="1.2 0.8"/>`
@@ -202,24 +240,48 @@ export function renderNet(opts) {
   return { svg, W, H, net };
 }
 
-// Star map content, from d3-celestial's sample data.
+// Star map content, from the data the reference notebook uses
+// (https://ofrohn.github.io/data, mirrored under src/data/sky).
 let skyData = null;
-function skyLayers(geo, style, proj) {
+function skyLayers(geo, style, proj, c) {
   if (!skyData) return '';
-  const mono = style === 'mono';
   const parts = [];
 
-  if (skyData.mw) {
-    const d = geo(skyData.mw) || '';
-    if (d) parts.push(`<path d="${d}" fill="${mono ? '#dddddd' : '#4a5a7a'}" opacity="0.55"/>`);
+  // The Milky Way is drawn as its *complement*: the source polygon reversed,
+  // so the band shows through and everything else is tinted. Filling the band
+  // itself would wash over the whole sphere in some orientations.
+  if (skyData.mwBg) {
+    const d = geo(skyData.mwBg) || '';
+    if (d) {
+      parts.push(`<path d="${d}" fill="${c.mw}" fill-rule="evenodd" stroke="${c.mw}" stroke-width="0.05"/>`);
+    }
   }
   if (skyData.constellationBounds) {
     const d = geo({ type: 'FeatureCollection', features: skyData.constellationBounds }) || '';
-    if (d) parts.push(`<path d="${d}" fill="none" stroke="#9aa8bd" stroke-width="0.12" stroke-dasharray="1 1.2" opacity="0.7"/>`);
+    if (d) {
+      parts.push(
+        `<path d="${d}" fill="none" stroke="${c.consBound}" stroke-width="${c.consBoundW}" stroke-dasharray="${c.consBoundW * 8} ${c.consBoundW * 10}" opacity="0.75"/>`,
+      );
+    }
   }
   if (skyData.constellationLines) {
     const d = geo({ type: 'FeatureCollection', features: skyData.constellationLines }) || '';
-    if (d) parts.push(`<path d="${d}" fill="none" stroke="#7f8ea6" stroke-width="0.15" opacity="0.8"/>`);
+    if (d) {
+      parts.push(
+        `<path d="${d}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`,
+      );
+    }
+  }
+  if (skyData.constellationNames) {
+    for (const f of skyData.constellationNames.features) {
+      const p = proj(f.geometry.coordinates);
+      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+      parts.push(
+        `<text x="${p[0].toFixed(1)}" y="${p[1].toFixed(1)}" dy="0.35em" text-anchor="middle" ` +
+          `font-family="sans-serif" font-size="${c.consNameSize}" fill="${c.consName}" opacity="0.75">` +
+          `${escapeXml(f.properties.desig ?? f.properties.name ?? '')}</text>`,
+      );
+    }
   }
   if (skyData.stars) {
     const stars = skyData.stars.features;
@@ -229,12 +291,21 @@ function skyLayers(geo, style, proj) {
       // projected point off the projection directly.
       const p = proj(f.geometry.coordinates);
       if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
-      const r = 0.16 + (5.5 - (f.properties?.mag ?? 5)) * 0.05;
-      dots += `M${p[0].toFixed(1)},${p[1].toFixed(1)}m${(-r).toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(r * 2).toFixed(2)},0a${r.toFixed(2)},${r.toFixed(2)} 0 1,0 ${(-r * 2).toFixed(2)},0`;
+      const r = starRadius(f.properties?.mag ?? 5, c.starMax, c.starMin);
+      dots += `M${p[0].toFixed(1)},${p[1].toFixed(1)}m${(-r).toFixed(3)},0a${r.toFixed(3)},${r.toFixed(3)} 0 1,0 ${(r * 2).toFixed(3)},0a${r.toFixed(3)},${r.toFixed(3)} 0 1,0 ${(-r * 2).toFixed(3)},0`;
     }
-    if (dots) parts.push(`<path d="${dots}" fill="${mono ? '#333333' : '#1b2436'}" fill-rule="evenodd"/>`);
+    if (dots) parts.push(`<path d="${dots}" fill="${c.star}" fill-rule="evenodd"/>`);
   }
   return parts.join('');
+}
+
+const escapeXml = (s) =>
+  String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]);
+
+// Brighter stars are bigger: map magnitude ~1 to rMax and ~5 to rMin.
+function starRadius(mag, rMax, rMin) {
+  const t = Math.max(0, Math.min(1, (mag - 1) / 4));
+  return rMax + (rMin - rMax) * t;
 }
 
 export async function loadSkyData() {
@@ -245,19 +316,40 @@ export async function loadSkyData() {
       if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
       return r.json();
     });
-  const [mw, stars, clines, cbounds] = await Promise.all([
+  const [mw, stars, clines, cbounds, cnames] = await Promise.all([
     fetchJson('mw.json'),
     fetchJson('stars.6.json'),
     fetchJson('constellations.lines.json'),
     fetchJson('constellations.bounds.json'),
+    fetchJson('constellations.json'),
   ]);
   skyData = {
-    mw,
+    // Reversing the outer ring turns the Milky Way band into everything
+    // outside it, which is what gets tinted so the band shows through.
+    mwBg: mwBackground(mw),
     stars: { ...stars, features: stars.features.filter((d) => (d.properties?.mag ?? 9) < 5) },
     constellationLines: clines,
     constellationBounds: cbounds,
+    constellationNames: cnames,
   };
   return skyData;
+}
+
+function mwBackground(mw) {
+  const ring = mw?.features?.[0]?.geometry?.coordinates?.[0];
+  if (!ring) return null;
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: [ring.map((p) => p.slice().reverse())],
+        },
+      },
+    ],
+  };
 }
 
 function graticuleLines() {

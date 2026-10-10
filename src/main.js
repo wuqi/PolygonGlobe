@@ -3,7 +3,7 @@
 
 import './style.css';
 import { SOLIDS } from './print/solids.js';
-import { renderNet, loadSkyData, THEME_KEYS, themeOf } from './print/sheet.js';
+import { renderNet, loadSkyData, THEME_KEYS, SKY_KEYS, SKY_WIDTHS, themeOf } from './print/sheet.js';
 
 const state = {
   polyKey: 'cube',
@@ -115,6 +115,8 @@ document.querySelectorAll('[data-style]').forEach((b) => {
 document.querySelectorAll('[data-base]').forEach((b) => {
   b.addEventListener('click', () => {
     state.base = b.dataset.base;
+    // The sky colours only apply to the star base, so show them when it is on.
+    buildPalette();
     syncToolbar();
     render();
   });
@@ -212,52 +214,74 @@ const WIDTH_KEYS = [
 
 const paletteEl = document.querySelector('#palette-grid');
 
+function addColorRow(list, defaults, key, label) {
+  const wrap = document.createElement('label');
+  wrap.className = 'swatch';
+  wrap.innerHTML = `<span>${label}</span>`;
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = state.theme[key] || defaults[key];
+  input.dataset.key = key;
+  const hex = document.createElement('span');
+  hex.className = 'hex';
+  hex.textContent = input.value;
+  input.addEventListener('input', () => {
+    state.theme[key] = input.value;
+    hex.textContent = input.value;
+    render();
+  });
+  wrap.append(input, hex);
+  list.append(wrap);
+}
+
+function addRangeRow(list, defaults, key, label, min, max, step) {
+  const wrap = document.createElement('label');
+  wrap.className = 'swatch';
+  wrap.innerHTML = `<span>${label}</span>`;
+  const base = state.theme[key] ?? defaults[key];
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min);
+  input.max = String(max);
+  input.step = String(step);
+  input.value = String(base);
+  const val = document.createElement('span');
+  val.className = 'hex';
+  val.textContent = Number(base).toFixed(2);
+  input.addEventListener('input', () => {
+    state.theme[key] = Number(input.value);
+    val.textContent = Number(input.value).toFixed(2);
+    render();
+  });
+  wrap.append(input, val);
+  list.append(wrap);
+}
+
+function addHeading(list, text) {
+  const h = document.createElement('div');
+  h.className = 'palette-group';
+  h.textContent = text;
+  list.append(h);
+}
+
 function buildPalette() {
   paletteEl.innerHTML = '';
   const defaults = themeOf(state.style);
-  for (const [key, label] of THEME_KEYS) {
-    const wrap = document.createElement('label');
-    wrap.className = 'swatch';
-    wrap.innerHTML = `<span>${label}</span>`;
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = state.theme[key] || defaults[key];
-    input.dataset.key = key;
-    input.addEventListener('input', () => {
-      state.theme[key] = input.value;
-      render();
-    });
-    const hex = document.createElement('span');
-    hex.className = 'hex';
-    hex.textContent = input.value;
-    input.addEventListener('input', () => {
-      hex.textContent = input.value;
-    });
-    wrap.append(input, hex);
-    paletteEl.append(wrap);
-  }
+
+  addHeading(paletteEl, '地图');
+  for (const [key, label] of THEME_KEYS) addColorRow(paletteEl, defaults, key, label);
   for (const [key, label] of WIDTH_KEYS) {
-    const wrap = document.createElement('label');
-    wrap.className = 'swatch';
-    wrap.innerHTML = `<span>${label}</span>`;
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = '0.05';
-    input.max = '1';
-    input.step = '0.05';
-    const base = state.theme[key] ?? defaults[key];
-    input.value = String(base);
-    input.dataset.key = key;
-    const val = document.createElement('span');
-    val.className = 'hex';
-    val.textContent = Number(base).toFixed(2);
-    input.addEventListener('input', () => {
-      state.theme[key] = Number(input.value);
-      val.textContent = Number(input.value).toFixed(2);
-      render();
-    });
-    wrap.append(input, val);
-    paletteEl.append(wrap);
+    addRangeRow(paletteEl, defaults, key, label, 0.05, 1, 0.05);
+  }
+
+  // Star map colours only matter when the sky base is selected.
+  if (state.base === 'sky') {
+    addHeading(paletteEl, '星图');
+    for (const [key, label] of SKY_KEYS) addColorRow(paletteEl, defaults, key, label);
+    for (const [key, label] of SKY_WIDTHS) {
+      const isSize = key === 'consNameSize';
+      addRangeRow(paletteEl, defaults, key, label, isSize ? 0.6 : 0.02, isSize ? 3 : 0.6, isSize ? 0.1 : 0.02);
+    }
   }
 }
 

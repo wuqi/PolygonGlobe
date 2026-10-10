@@ -176,6 +176,15 @@ body {
   color: var(--fg);
 }
 
+.palette-group {
+  margin: 6px 0 2px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
 .palette-grid {
   display: grid;
   gap: 6px 10px;
