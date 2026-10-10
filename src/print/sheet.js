@@ -65,6 +65,9 @@ const THEME = {
 const n3 = (v) => Math.round(v * 1000) / 1000;
 const dOf = (pts, close) => 'M' + pts.map((p) => `${n3(p[0])},${n3(p[1])}`).join('L') + (close ? 'Z' : '');
 
+// Projected path strings keyed by everything but colour.
+const layerCache = new Map();
+
 // Palette entries the UI is allowed to override, in the order they are shown.
 export const THEME_KEYS = [
   ['page', '纸张'],
@@ -211,10 +214,41 @@ export function renderNet(opts) {
 
   // Map content uses the same net->page mapping as everything else, so the
   // projection was re-scaled above in step with the fit.
+  //
+  // These paths are expensive: the world outline alone is ~370ms and the
+  // graticule ~260ms, because geoPath resamples densely across each face.
+  // None of that depends on colour, so memoise by geometry and reuse the
+  // strings when only the palette changes - otherwise dragging a colour
+  // picker reruns the whole projection every pixel of travel.
   const geo = geoPath(proj);
-  const dLand = base === 'vector' ? geo({ type: 'FeatureCollection', features: worldFeatures }) || '' : '';
-  const dChina = base === 'vector' && china ? geo(chinaFeature) || '' : '';
-  const dGrat = graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '';
+  setStarScale(c.starMax, c.starMin);
+  // The star radius is baked into the dots, so it has to be part of the key.
+  const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}`;
+  let layers = layerCache.get(layerKey);
+  if (!layers) {
+    layers = {
+      dLand: base === 'vector' ? geo({ type: 'FeatureCollection', features: worldFeatures }) || '' : '',
+      dChina: base === 'vector' && china ? geo(chinaFeature) || '' : '',
+      dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
+      dSky: base === 'sky' ? skyLayers(geo, proj) : '',
+    };
+    if (layerCache.size > 12) layerCache.clear();
+    layerCache.set(layerKey, layers);
+  }
+  const { dLand, dChina, dGrat, dSky } = layers;
+
+  const skyPaths = base === 'sky'
+    ? [
+        dSky.dMw ? `<path d="${dSky.dMw}" fill="${c.mw}" fill-rule="evenodd" stroke="${c.mw}" stroke-width="0.05"/>` : '',
+        dSky.dBounds
+          ? `<path d="${dSky.dBounds}" fill="none" stroke="${c.consBound}" stroke-width="${c.consBoundW}" stroke-dasharray="${c.consBoundW * 8} ${c.consBoundW * 10}" opacity="0.75"/>`
+          : '',
+        dSky.dLines
+          ? `<path d="${dSky.dLines}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`
+          : '',
+        dSky.dStars ? `<path d="${dSky.dStars}" fill="${c.star}" fill-rule="evenodd"/>` : '',
+      ].join('')
+    : '';
 
   const label = `${solid.name} · ${net.faceCount} 面 · ${page} · ${style === 'color' ? '彩色' : '单色'}`;
   const svg = [
@@ -227,7 +261,7 @@ export function renderNet(opts) {
     dGrat ? `<path d="${dGrat}" fill="none" stroke="${c.grat}" stroke-width="${c.gratW}"/>` : '',
     `<path d="${dLand}" fill="${c.land}" stroke="${c.coast}" stroke-width="0.1"/>`,
     `<path d="${dChina}" fill="${c.china}" stroke="${c.coast}" stroke-width="0.12"/>`,
-    base === 'sky' ? skyLayers(geo, style, proj, c) : '',
+    skyPaths,
     `</g>`,
     showFolds
       ? `<path d="${dFolds}" fill="none" stroke="${c.fold}" stroke-width="${c.foldW}" stroke-dasharray="1.2 0.8"/>`
@@ -242,59 +276,51 @@ export function renderNet(opts) {
 
 // Star map content, from the data the reference notebook uses
 // (https://ofrohn.github.io/data, mirrored under src/data/sky).
+// Returns bare path strings; the palette is applied by the caller so colour
+// changes never re-run the projection.
 let skyData = null;
-function skyLayers(geo, style, proj, c) {
-  if (!skyData) return '';
-  const parts = [];
+function skyLayers(geo, proj) {
+  if (!skyData) return { dMw: '', dBounds: '', dLines: '', dStars: '' };
+  const out = { dMw: '', dBounds: '', dLines: '', dStars: '' };
 
   // The Milky Way is drawn as its *complement*: the source polygon reversed,
   // so the band shows through and everything else is tinted. Filling the band
   // itself would wash over the whole sphere in some orientations.
   if (skyData.mwBg) {
-    const d = geo(skyData.mwBg) || '';
-    if (d) {
-      parts.push(`<path d="${d}" fill="${c.mw}" fill-rule="evenodd" stroke="${c.mw}" stroke-width="0.05"/>`);
-    }
+    out.dMw = geo(skyData.mwBg) || '';
   }
   // These are already FeatureCollections; wrapping them in another one nests
   // a collection inside `features`, which yields an empty path.
   if (skyData.constellationBounds) {
-    const d = geo(skyData.constellationBounds) || '';
-    if (d) {
-      parts.push(
-        `<path d="${d}" fill="none" stroke="${c.consBound}" stroke-width="${c.consBoundW}" stroke-dasharray="${c.consBoundW * 8} ${c.consBoundW * 10}" opacity="0.75"/>`,
-      );
-    }
+    out.dBounds = geo(skyData.constellationBounds) || '';
   }
   if (skyData.constellationLines) {
-    const d = geo(skyData.constellationLines) || '';
-    if (d) {
-      parts.push(
-        `<path d="${d}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`,
-      );
-    }
+    out.dLines = geo(skyData.constellationLines) || '';
   }
   if (skyData.stars) {
-    const stars = skyData.stars.features;
     let dots = '';
-    for (const f of stars) {
+    for (const f of skyData.stars.features) {
       // geoPath(f) returns an SVG path string, not coordinates, so read the
       // projected point off the projection directly.
       const p = proj(f.geometry.coordinates);
       if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
-      const r = starRadius(f.properties?.mag ?? 5, c.starMax, c.starMin);
+      const r = starRadius(f.properties?.mag ?? 5);
       dots += `M${p[0].toFixed(1)},${p[1].toFixed(1)}m${(-r).toFixed(3)},0a${r.toFixed(3)},${r.toFixed(3)} 0 1,0 ${(r * 2).toFixed(3)},0a${r.toFixed(3)},${r.toFixed(3)} 0 1,0 ${(-r * 2).toFixed(3)},0`;
     }
-    if (dots) parts.push(`<path d="${dots}" fill="${c.star}" fill-rule="evenodd"/>`);
+    out.dStars = dots;
   }
-  return parts.join('');
+  return out;
 }
 
-const escapeXml = (s) =>
-  String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]);
+// Star radius in mm, from a magnitude scale set at render time.
+let starScale = { max: 0.24, min: 0.05 };
+function setStarScale(max, min) {
+  starScale = { max, min };
+}
 
 // Brighter stars are bigger: map magnitude ~1 to rMax and ~5 to rMin.
-function starRadius(mag, rMax, rMin) {
+function starRadius(mag) {
+  const { max: rMax, min: rMin } = starScale;
   const t = Math.max(0, Math.min(1, (mag - 1) / 4));
   return rMax + (rMin - rMax) * t;
 }
