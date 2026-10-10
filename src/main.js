@@ -3,7 +3,7 @@
 
 import './style.css';
 import { SOLIDS } from './print/solids.js';
-import { renderNet, loadSkyData } from './print/sheet.js';
+import { renderNet, loadSkyData, THEME_KEYS, themeOf } from './print/sheet.js';
 
 const state = {
   polyKey: 'cube',
@@ -14,6 +14,8 @@ const state = {
   graticule: false,
   folds: true,
   china: true,
+  // Overrides on top of the built-in palette; empty means "use the default".
+  theme: {},
 };
 
 const app = document.querySelector('#app');
@@ -24,6 +26,13 @@ app.innerHTML = `
       <p>选择多面体，生成可打印的纸模展开图</p>
     </div>
     <div class="solid-list" id="solid-list"></div>
+    <details class="palette">
+      <summary>配色</summary>
+      <div class="palette-grid" id="palette-grid"></div>
+      <div class="palette-foot">
+        <button class="btn tiny" id="reset-theme">恢复默认</button>
+      </div>
+    </details>
     <div class="sidebar-foot">
       <span id="stat"></span>
     </div>
@@ -96,6 +105,9 @@ document.querySelectorAll('[data-page]').forEach((b) => {
 document.querySelectorAll('[data-style]').forEach((b) => {
   b.addEventListener('click', () => {
     state.style = b.dataset.style;
+    // The two palettes have different defaults, so refresh the swatches.
+    state.theme = {};
+    buildPalette();
     syncToolbar();
     render();
   });
@@ -190,10 +202,84 @@ function solidOf() {
   return SOLIDS.find((s) => s.key === state.solid);
 }
 
+// Line widths share the palette, so expose them next to the colours.
+const WIDTH_KEYS = [
+  ['cutW', '剪切线宽'],
+  ['foldW', '折线宽'],
+  ['gratW', '经纬网宽'],
+  ['tabW', '贴边宽'],
+];
+
+const paletteEl = document.querySelector('#palette-grid');
+
+function buildPalette() {
+  paletteEl.innerHTML = '';
+  const defaults = themeOf(state.style);
+  for (const [key, label] of THEME_KEYS) {
+    const wrap = document.createElement('label');
+    wrap.className = 'swatch';
+    wrap.innerHTML = `<span>${label}</span>`;
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = state.theme[key] || defaults[key];
+    input.dataset.key = key;
+    input.addEventListener('input', () => {
+      state.theme[key] = input.value;
+      render();
+    });
+    const hex = document.createElement('span');
+    hex.className = 'hex';
+    hex.textContent = input.value;
+    input.addEventListener('input', () => {
+      hex.textContent = input.value;
+    });
+    wrap.append(input, hex);
+    paletteEl.append(wrap);
+  }
+  for (const [key, label] of WIDTH_KEYS) {
+    const wrap = document.createElement('label');
+    wrap.className = 'swatch';
+    wrap.innerHTML = `<span>${label}</span>`;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = '0.05';
+    input.max = '1';
+    input.step = '0.05';
+    const base = state.theme[key] ?? defaults[key];
+    input.value = String(base);
+    input.dataset.key = key;
+    const val = document.createElement('span');
+    val.className = 'hex';
+    val.textContent = Number(base).toFixed(2);
+    input.addEventListener('input', () => {
+      state.theme[key] = Number(input.value);
+      val.textContent = Number(input.value).toFixed(2);
+      render();
+    });
+    wrap.append(input, val);
+    paletteEl.append(wrap);
+  }
+}
+
+document.querySelector('#reset-theme').addEventListener('click', () => {
+  state.theme = {};
+  buildPalette();
+  render();
+});
+
 let cached = null;
 let cacheKey = '';
 function current() {
-  const key = [state.solid, state.page, state.style, state.graticule, state.folds, state.base, state.china].join('|');
+  const key = [
+    state.solid,
+    state.page,
+    state.style,
+    state.graticule,
+    state.folds,
+    state.base,
+    state.china,
+    JSON.stringify(state.theme),
+  ].join('|');
   if (!cached || cacheKey !== key) {
     cached = renderNet({
       solid: solidOf(),
@@ -203,6 +289,7 @@ function current() {
       showFolds: state.folds,
       base: state.base,
       china: state.china,
+      theme: state.theme,
     });
     cacheKey = key;
   }
@@ -273,6 +360,7 @@ listEl.querySelectorAll('.thumb').forEach((el) => io.observe(el));
 
 syncSelection();
 syncToolbar();
+buildPalette();
 render();
 
 // star data is ~1.2MB of JSON; fetch it the first time it is actually needed

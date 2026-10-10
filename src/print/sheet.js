@@ -45,11 +45,29 @@ const THEME = {
 const n3 = (v) => Math.round(v * 1000) / 1000;
 const dOf = (pts, close) => 'M' + pts.map((p) => `${n3(p[0])},${n3(p[1])}`).join('L') + (close ? 'Z' : '');
 
+// Palette entries the UI is allowed to override, in the order they are shown.
+export const THEME_KEYS = [
+  ['page', '纸张'],
+  ['face', '地图底色'],
+  ['land', '陆地填充'],
+  ['china', '中国填充'],
+  ['coast', '描边'],
+  ['grat', '经纬网'],
+  ['fold', '折线'],
+  ['cut', '剪切线'],
+  ['tab', '贴边'],
+];
+
+export function themeOf(style) {
+  return { ...(THEME[style] || THEME.color) };
+}
+
 /**
  * @param opts.solid   entry from SOLIDS
  * @param opts.page    'A4' | 'A5'
  * @param opts.style   'color' | 'mono'
  * @param opts.margin  page margin in mm
+ * @param opts.theme   colour overrides merged on top of the style's palette
  */
 export function renderNet(opts) {
   const {
@@ -63,7 +81,7 @@ export function renderNet(opts) {
     china = true,
   } = opts;
   const [W0, H0] = PAGES[page] || PAGES.A4;
-  const c = THEME[style] || THEME.color;
+  const c = { ...(THEME[style] || THEME.color), ...(opts.theme || {}) };
 
   const net = buildNet(solid);
 
