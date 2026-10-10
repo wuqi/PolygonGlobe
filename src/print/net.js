@@ -11,6 +11,44 @@ import { resolve } from './solids.js';
 
 const pkey = (p) => `${Math.round(p[0] * 1e6) / 1e6},${Math.round(p[1] * 1e6) / 1e6}`;
 
+// Chain cut edges into closed loops. Only cuts bound the net (folds connect
+// faces that legitimately touch), so walking them by shared endpoint recovers
+// the boundary that glue tabs hang off.
+function chainOutline(cuts, { tol = 1e-9 } = {}) {
+  const key = (p) => `${Math.round(p[0] / tol)},${Math.round(p[1] / tol)}`;
+  const loops = [];
+  const todo = cuts.map((c) => ({ ...c, pts: [c.a, c.b], used: false }));
+  // Sample every edge so the loop can be compared against faces reliably.
+  const flat = [];
+  for (const c of todo) flat.push({ e: c, from: c.a, to: c.b });
+
+  const adj = new Map();
+  for (const f of flat) {
+    for (const [u, v] of [[f.from, f.to], [f.to, f.from]]) {
+      const k = key(u);
+      if (!adj.has(k)) adj.set(k, []);
+      adj.get(k).push({ u, v, e: f.e });
+    }
+  }
+
+  while (flat.some((f) => !f.e.used)) {
+    const start = flat.find((f) => !f.e.used);
+    start.e.used = true;
+    const loop = [{ pts: [start.from, start.to] }];
+    let cur = start.to;
+    for (;;) {
+      const cands = adj.get(key(cur)) || [];
+      const next = cands.find((c) => !c.e.used);
+      if (!next) break;
+      next.e.used = true;
+      loop.push({ pts: [next.u, next.v] });
+      cur = next.v;
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+  return loops;
+}
+
 // Planar position of a lon/lat point on a node, matching the library's forward()
 // (note the y negation - polyhedral flips it internally).
 function nodePoint(node, pt) {
@@ -203,6 +241,16 @@ export function buildNet(solid, { scale = 100 } = {}) {
   }
 
   const foldCount = folds.size;
+
+  // Chain the cut edges into closed loops so glue tabs can be attached to them.
+  const outline = chainOutline(
+    cuts.map(({ face, a, b }) => ({
+      face,
+      a: pt(nodes[face], a),
+      b: pt(nodes[face], b),
+    }))
+  );
+
   return {
     key: solid.key,
     name: solid.name,
@@ -213,6 +261,7 @@ export function buildNet(solid, { scale = 100 } = {}) {
     // net-space point for a node corner; page = [tx + k*X, ty + k*Y]
     pt,
     faces: polys,
+    outline,
     faceCount: polys.length,
     folds: foldCount,
     cuts: cuts.length,

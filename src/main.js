@@ -3,13 +3,17 @@
 
 import './style.css';
 import { SOLIDS } from './print/solids.js';
-import { renderNet } from './print/sheet.js';
+import { renderNet, loadSkyData } from './print/sheet.js';
 
 const state = {
+  polyKey: 'cube',
   solid: 'cube',
   page: 'A4',
   style: 'color',
+  base: 'vector',
   graticule: false,
+  folds: true,
+  china: true,
 };
 
 const app = document.querySelector('#app');
@@ -38,7 +42,15 @@ app.innerHTML = `
         <button class="seg" data-style="mono">单色</button>
       </div>
       <div class="grp">
+        <label>底图</label>
+        <button class="seg" data-base="vector">矢量</button>
+        <button class="seg" data-base="raster">栅格</button>
+        <button class="seg" data-base="sky">星图</button>
+      </div>
+      <div class="grp">
+        <label class="chk"><input type="checkbox" id="china" checked> 中国标红</label>
         <label class="chk"><input type="checkbox" id="grat"> 经纬网</label>
+        <label class="chk"><input type="checkbox" id="folds" checked> 折线</label>
       </div>
       <div class="grp right">
         <button class="btn" id="dl-png">导出 PNG</button>
@@ -88,10 +100,19 @@ document.querySelectorAll('[data-style]').forEach((b) => {
     render();
   });
 });
-document.querySelector('#grat').addEventListener('change', (e) => {
-  state.graticule = e.target.checked;
-  render();
+document.querySelectorAll('[data-base]').forEach((b) => {
+  b.addEventListener('click', () => {
+    state.base = b.dataset.base;
+    syncToolbar();
+    render();
+  });
 });
+for (const id of ['grat', 'folds', 'china']) {
+  document.querySelector('#' + id).addEventListener('change', (e) => {
+    state[id] = e.target.checked;
+    render();
+  });
+}
 
 document.querySelector('#dl-svg').addEventListener('click', () => {
   const { svg } = current();
@@ -167,9 +188,17 @@ function solidOf() {
 let cached = null;
 let cacheKey = '';
 function current() {
-  const key = `${state.solid}|${state.page}|${state.style}|${state.graticule}`;
+  const key = [state.solid, state.page, state.style, state.graticule, state.folds, state.base, state.china].join('|');
   if (!cached || cacheKey !== key) {
-    cached = renderNet({ solid: solidOf(), page: state.page, style: state.style, graticule: state.graticule });
+    cached = renderNet({
+      solid: solidOf(),
+      page: state.page,
+      style: state.style,
+      graticule: state.graticule,
+      showFolds: state.folds,
+      base: state.base,
+      china: state.china,
+    });
     cacheKey = key;
   }
   return cached;
@@ -196,6 +225,9 @@ function syncToolbar() {
   });
   document.querySelectorAll('[data-style]').forEach((b) => {
     b.classList.toggle('on', b.dataset.style === state.style);
+  });
+  document.querySelectorAll('[data-base]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.base === state.base);
   });
 }
 
@@ -237,3 +269,20 @@ listEl.querySelectorAll('.thumb').forEach((el) => io.observe(el));
 syncSelection();
 syncToolbar();
 render();
+
+// star data is ~1.2MB of JSON; fetch it the first time it is actually needed
+let skyRequested = false;
+document.querySelectorAll('[data-base]').forEach((b) => {
+  b.addEventListener('click', async () => {
+    if (b.dataset.base === 'sky' && !skyRequested) {
+      skyRequested = true;
+      try {
+        await loadSkyData();
+        render();
+      } catch (e) {
+        console.error(e);
+        alert('星图数据加载失败');
+      }
+    }
+  });
+});

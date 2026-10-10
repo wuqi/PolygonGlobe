@@ -8,7 +8,7 @@
 
 import { geoCentroid, geoInterpolate, geoRotation } from 'd3-geo';
 import { SOLIDS } from '../src/print/solids.js';
-import { buildNet, rawToNet } from '../src/print/net.js';
+import { buildNet } from '../src/print/net.js';
 import { renderNet } from '../src/print/sheet.js';
 
 let failures = 0;
@@ -35,6 +35,9 @@ console.log('== net vs d3 page alignment ==');
 for (const s of SOLIDS) {
   const r = buildNet(s);
   const proj = r.proj;
+  // A vertex shared by several faces legitimately has one planar position per
+  // face, so compare interior points instead: probe slightly inside each face
+  // where exactly one face owns the location.
   const rot = geoRotation(proj.rotate());
   const k = proj.scale();
   const [tx, ty] = proj.translate();
@@ -43,18 +46,9 @@ for (const s of SOLIDS) {
     const ring = n.face;
     const cen = geoCentroid({ type: 'Polygon', coordinates: [[...ring, ring[0]]] });
     for (let i = 0; i < ring.length; i++) {
-      // Pull the corner inside the face, and stay off the antimeridian where
-      // rot.invert jumps by 360 and the point lands on a different face.
-      const q = geoInterpolate(ring[i], cen)(0.2);
-      if (Math.abs(Math.abs(q[0]) - 180) < 5) continue;
+      const q = geoInterpolate(ring[i], cen)(0.25);
       const expected = proj(rot.invert(q));
-      const netPt = rawToNet(r.xf, (() => {
-        const p = n.project(q);
-        const t = n.transform;
-        return t
-          ? [t[0] * p[0] + t[1] * p[1] + t[2], -(t[3] * p[0] + t[4] * p[1] + t[5])]
-          : [p[0], -p[1]];
-      })());
+      const netPt = r.pt(n, q);
       const got = [tx + k * netPt[0], ty + k * netPt[1]];
       const err = Math.hypot(expected[0] - got[0], expected[1] - got[1]);
       if (err > maxErr) maxErr = err;
