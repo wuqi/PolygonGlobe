@@ -107,9 +107,14 @@ document.querySelectorAll('[data-base]').forEach((b) => {
     render();
   });
 });
-for (const id of ['grat', 'folds', 'china']) {
-  document.querySelector('#' + id).addEventListener('change', (e) => {
-    state[id] = e.target.checked;
+// The checkbox id is `grat`, but the render option is called `graticule`.
+// Writing to state[id] put the flag in an unused field, so the toggle never
+// reached renderNet and the graticule stayed off.
+for (const [id, field] of [['grat', 'graticule'], ['folds', 'folds'], ['china', 'china']]) {
+  const el = document.querySelector('#' + id);
+  if (!el) continue;
+  el.addEventListener('change', (e) => {
+    state[field] = e.target.checked;
     render();
   });
 }
