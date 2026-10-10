@@ -223,7 +223,10 @@ export function renderNet(opts) {
   const geo = geoPath(proj);
   setStarScale(c.starMax, c.starMin);
   // The star radius is baked into the dots, so it has to be part of the key.
-  const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}`;
+  // skyVersion bumps once the star JSON lands: without it the first render
+  // after switching to the sky base caches an empty sheet (data still in
+  // flight) and every later render reuses that empty entry.
+  const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}|${skyVersion}`;
   let layers = layerCache.get(layerKey);
   if (!layers) {
     layers = {
@@ -232,8 +235,13 @@ export function renderNet(opts) {
       dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
       dSky: base === 'sky' ? skyLayers(geo, proj) : '',
     };
-    if (layerCache.size > 12) layerCache.clear();
-    layerCache.set(layerKey, layers);
+    // Never memoise a render that ran before the sky data arrived; the next
+    // one has to redo it.
+    const skyReady = base !== 'sky' || Boolean(skyData);
+    if (skyReady) {
+      if (layerCache.size > 12) layerCache.clear();
+      layerCache.set(layerKey, layers);
+    }
   }
   const { dLand, dChina, dGrat, dSky } = layers;
 
@@ -279,6 +287,9 @@ export function renderNet(opts) {
 // Returns bare path strings; the palette is applied by the caller so colour
 // changes never re-run the projection.
 let skyData = null;
+// Bumped when the star data lands, so cached layers built before that are
+// recomputed instead of being served empty.
+let skyVersion = 0;
 function skyLayers(geo, proj) {
   if (!skyData) return { dMw: '', dBounds: '', dLines: '', dStars: '' };
   const out = { dMw: '', dBounds: '', dLines: '', dStars: '' };
@@ -329,6 +340,7 @@ function starRadius(mag) {
 // instead of going through fetch.
 export function __injectSky(data) {
   skyData = data;
+  skyVersion++;
 }
 export async function loadSkyData() {
   if (skyData) return skyData;
@@ -354,6 +366,7 @@ export async function loadSkyData() {
     constellationBounds: cbounds,
     constellationNames: cnames,
   };
+  skyVersion++;
   return skyData;
 }
 
