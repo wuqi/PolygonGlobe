@@ -18,7 +18,7 @@ const THEME = {
     cutW: 0.5,
     fold: '#5b7ea6',
     foldW: 0.25,
-    grat: '#4a6f96',
+    grat: '#1f4e79',
     gratW: 0.18,
     tabFill: '#ffffff',
     tab: '#7a8ea0',
@@ -34,7 +34,7 @@ const THEME = {
     cutW: 0.5,
     fold: '#777777',
     foldW: 0.25,
-    grat: '#8a8a8a',
+    grat: '#2b3f55',
     gratW: 0.2,
     tabFill: '#ffffff',
     tab: '#888888',
@@ -236,14 +236,14 @@ export async function loadSkyData() {
 
 function graticuleLines() {
   const lines = [];
-  for (let lon = -180; lon < 180; lon += 15) {
+  for (let lon = -180; lon < 180; lon += 10) {
     const l = [];
-    for (let lat = -90; lat <= 90; lat += 3) l.push([lon, lat]);
+    for (let lat = -90; lat <= 90; lat += 2) l.push([lon, lat]);
     lines.push({ type: 'LineString', coordinates: l });
   }
-  for (let lat = -75; lat <= 75; lat += 15) {
+  for (let lat = -80; lat <= 80; lat += 10) {
     const l = [];
-    for (let lon = -180; lon <= 180; lon += 3) l.push([lon, lat]);
+    for (let lon = -180; lon <= 180; lon += 2) l.push([lon, lat]);
     lines.push({ type: 'LineString', coordinates: l });
   }
   return lines;
