@@ -256,8 +256,10 @@ function skyLayers(geo, style, proj, c) {
       parts.push(`<path d="${d}" fill="${c.mw}" fill-rule="evenodd" stroke="${c.mw}" stroke-width="0.05"/>`);
     }
   }
+  // These are already FeatureCollections; wrapping them in another one nests
+  // a collection inside `features`, which yields an empty path.
   if (skyData.constellationBounds) {
-    const d = geo({ type: 'FeatureCollection', features: skyData.constellationBounds }) || '';
+    const d = geo(skyData.constellationBounds) || '';
     if (d) {
       parts.push(
         `<path d="${d}" fill="none" stroke="${c.consBound}" stroke-width="${c.consBoundW}" stroke-dasharray="${c.consBoundW * 8} ${c.consBoundW * 10}" opacity="0.75"/>`,
@@ -265,21 +267,10 @@ function skyLayers(geo, style, proj, c) {
     }
   }
   if (skyData.constellationLines) {
-    const d = geo({ type: 'FeatureCollection', features: skyData.constellationLines }) || '';
+    const d = geo(skyData.constellationLines) || '';
     if (d) {
       parts.push(
         `<path d="${d}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`,
-      );
-    }
-  }
-  if (skyData.constellationNames) {
-    for (const f of skyData.constellationNames.features) {
-      const p = proj(f.geometry.coordinates);
-      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
-      parts.push(
-        `<text x="${p[0].toFixed(1)}" y="${p[1].toFixed(1)}" dy="0.35em" text-anchor="middle" ` +
-          `font-family="sans-serif" font-size="${c.consNameSize}" fill="${c.consName}" opacity="0.75">` +
-          `${escapeXml(f.properties.desig ?? f.properties.name ?? '')}</text>`,
       );
     }
   }
@@ -308,6 +299,11 @@ function starRadius(mag, rMax, rMin) {
   return rMax + (rMin - rMax) * t;
 }
 
+// Lets the test suite exercise the sky layers against the checked-in JSON
+// instead of going through fetch.
+export function __injectSky(data) {
+  skyData = data;
+}
 export async function loadSkyData() {
   if (skyData) return skyData;
   // These live in src/data/sky, one level up from this module.

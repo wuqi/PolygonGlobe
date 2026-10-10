@@ -293,6 +293,9 @@ document.querySelector('#reset-theme').addEventListener('click', () => {
 
 let cached = null;
 let cacheKey = '';
+// Set once the star JSON is in memory; part of the cache key so the first
+// sky render waits for data instead of caching an empty sheet.
+let skyReady = false;
 function current() {
   const key = [
     state.solid,
@@ -303,6 +306,11 @@ function current() {
     state.base,
     state.china,
     JSON.stringify(state.theme),
+    // The sky layers depend on asynchronously loaded data. Without this the
+    // first render after switching to the sky base caches an empty SVG, and
+    // re-rendering after the data arrives reuses that cache, so nothing shows
+    // until some unrelated option changes the key.
+    skyReady ? 'sky-ready' : 'sky-pending',
   ].join('|');
   if (!cached || cacheKey !== key) {
     cached = renderNet({
@@ -395,6 +403,7 @@ document.querySelectorAll('[data-base]').forEach((b) => {
       skyRequested = true;
       try {
         await loadSkyData();
+        skyReady = true;
         render();
       } catch (e) {
         console.error(e);
