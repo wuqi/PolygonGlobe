@@ -9,6 +9,13 @@
 // To add a solid, append an entry to SOLIDS. Nothing else needs to change.
 
 import { geoCentroid, geoInterpolate } from 'd3-geo';
+import {
+  geoCubic,
+  geoDodecahedral,
+  geoIcosahedral,
+  geoPolyhedralButterfly,
+  geoTetrahedralLee,
+} from 'd3-geo-polygon';
 
 const D = 180 / Math.PI;
 
@@ -196,12 +203,35 @@ const pentakis = {
   angle: 55,
 };
 
+// --- projections built from d3-geo-polygon's own factories ----------------
+// These carry their own vertices, unfolding tree, angle and rotation, so they
+// only need `make`; the table-driven path above cannot express them.
+const icosaIco = { make: () => geoIcosahedral() };
+const butterfly = { make: () => geoPolyhedralButterfly() };
+const tetraLee = { make: () => geoTetrahedralLee() };
+const cubicLib = { make: () => geoCubic() };
+
+// From https://observablehq.com/@fil/dodecahedral-projection - a different
+// unfolding tree and rotation than the library default.
+const dodecaFil = {
+  make: () =>
+    geoDodecahedral()
+      .parents([-1, 0, 0, 0, 9, 0, 9, 0, 3, 8, 9, 9])
+      .angle(72)
+      .rotate([3, 0, -32]),
+};
+
 export const SOLIDS = [
   { key: 'tetra', name: '正四面体', en: 'Tetrahedron', ...tetra },
+  { key: 'tetraLee', name: '李氏四面体', en: 'Tetrahedral (Lee)', ...tetraLee },
   { key: 'cube', name: '正方体', en: 'Cube', ...cube },
+  { key: 'cubic', name: '立方体(库)', en: 'Cubic (library)', ...cubicLib },
   { key: 'octa', name: '正八面体', en: 'Octahedron', ...octa },
+  { key: 'butterfly', name: '蝶形八面体', en: 'Butterfly', ...butterfly },
   { key: 'icosa', name: '正二十面体', en: 'Icosahedron', ...icosahedron },
+  { key: 'icosaIco', name: '二十面体(库)', en: 'Icosahedral (library)', ...icosaIco },
   { key: 'dodeca', name: '正十二面体', en: 'Dodecahedron', ...dodecahedron },
+  { key: 'dodecaFil', name: '十二面体(Fil)', en: 'Dodecahedral (Fil)', ...dodecaFil },
   { key: 'rhdodeca', name: '菱形十二面体', en: 'Rhombic Dodecahedron', ...rhombicDodeca },
   { key: 'deltoidal', name: '鸢形六十面体', en: 'Deltoidal Hexecontahedron', ...deltoidal },
   // TODO(pentakis): the parents table from the source notebook does not match
@@ -213,7 +243,10 @@ export const SOLIDS = [
 export { pentakis };
 
 // Resolve a solid into { faces: [[lon,lat],...], parents } form.
+// Solids built from a library factory only have `make`; their geometry lives
+// inside the projection, so there is nothing to resolve.
 export function resolve(solid) {
+  if (solid.make) return { faces: [], parents: [], rotate: [0, 0], angle: 0 };
   const faces = solid.literalFaces
     ? solid.literalFaces.map((f) => f.map((p) => [p[0], p[1]]))
     : solid.faces.map((idx) => idx.map((i) => [solid.vertices[i][0], solid.vertices[i][1]]));

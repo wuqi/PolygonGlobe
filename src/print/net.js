@@ -163,21 +163,29 @@ function segCross(a, b, c, d) {
 export function buildNet(solid, { scale = 100 } = {}) {
   const { faces, parents, rotate, angle } = resolve(solid);
 
-  const polygons = {
-    type: 'FeatureCollection',
-    features: faces.map((face) => ({
-      type: 'Feature',
-      properties: {},
-      geometry: { type: 'Polygon', coordinates: [[...face, face[0]]] },
-    })),
-  };
+  let proj;
+  if (solid.make) {
+    // Solids built from a ready-made d3-geo-polygon factory (geoIcosahedral,
+    // geoPolyhedralButterfly, ...). Those carry their own vertices, unfolding
+    // tree, angle and rotation, so there is nothing left to assemble.
+    proj = solid.make();
+  } else {
+    const polygons = {
+      type: 'FeatureCollection',
+      features: faces.map((face) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates: [[...face, face[0]]] },
+      })),
+    };
 
-  const proj = geoPolyhedralVoronoi()
-    .parents(parents)
-    .polygons(polygons)
-    .rotate(rotate)
-    .scale(scale);
-  if (angle) proj.angle(angle);
+    proj = geoPolyhedralVoronoi()
+      .parents(parents)
+      .polygons(polygons)
+      .rotate(rotate)
+      .scale(scale);
+    if (angle) proj.angle(angle);
+  }
 
   const nodes = collectNodes(proj);
   const xf = solveFrame(proj, nodes[0]);
