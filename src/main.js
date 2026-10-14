@@ -3,7 +3,7 @@
 
 import './style.css';
 import { SOLIDS } from './print/solids.js';
-import { renderNet, loadSkyData, THEME_KEYS, SKY_KEYS, SKY_WIDTHS, themeOf } from './print/sheet.js';
+import { renderNet, loadSkyData, loadRasterData, THEME_KEYS, SKY_KEYS, SKY_WIDTHS, themeOf } from './print/sheet.js';
 
 const state = {
   polyKey: 'cube',
@@ -296,6 +296,8 @@ let cacheKey = '';
 // Set once the star JSON is in memory; part of the cache key so the first
 // sky render waits for data instead of caching an empty sheet.
 let skyReady = false;
+// Same for the Blue Marble bitmap, which is fetched and rasterised on demand.
+let rasterReady = false;
 function current() {
   const key = [
     state.solid,
@@ -311,6 +313,7 @@ function current() {
     // re-rendering after the data arrives reuses that cache, so nothing shows
     // until some unrelated option changes the key.
     skyReady ? 'sky-ready' : 'sky-pending',
+    rasterReady ? 'raster-ready' : 'raster-pending',
   ].join('|');
   if (!cached || cacheKey !== key) {
     cached = renderNet({
@@ -397,9 +400,11 @@ render();
 
 // star data is ~1.2MB of JSON; fetch it the first time it is actually needed
 let skyRequested = false;
+let rasterRequested = false;
 document.querySelectorAll('[data-base]').forEach((b) => {
   b.addEventListener('click', async () => {
-    if (b.dataset.base === 'sky' && !skyRequested) {
+    const base = b.dataset.base;
+    if (base === 'sky' && !skyRequested) {
       skyRequested = true;
       try {
         await loadSkyData();
@@ -408,6 +413,17 @@ document.querySelectorAll('[data-base]').forEach((b) => {
       } catch (e) {
         console.error(e);
         alert('星图数据加载失败');
+      }
+    }
+    if (base === 'raster' && !rasterRequested) {
+      rasterRequested = true;
+      try {
+        await loadRasterData();
+        rasterReady = true;
+        render();
+      } catch (e) {
+        console.error(e);
+        alert('栅格底图加载失败');
       }
     }
   });

@@ -2,6 +2,7 @@
 
 import { geoPath } from 'd3-geo';
 import { buildNet } from './net.js';
+import { rasterizeFaces, imageToSource } from './raster.js';
 import { glueTabs } from './tabs.js';
 import { worldFeatures, chinaFeature } from '../data/world.js';
 
@@ -29,7 +30,7 @@ const THEME = {
     consNameSize: 1.1,
     star: '#16233a',
     starMax: 0.24,
-    starMin: 0.05,
+    rasterOpacity: 1,
     tabFill: '#ffffff',
     tab: '#7a8ea0',
     tabW: 0.2,
@@ -55,7 +56,7 @@ const THEME = {
     consNameSize: 1.1,
     star: '#111111',
     starMax: 0.24,
-    starMin: 0.05,
+    rasterOpacity: 1,
     tabFill: '#ffffff',
     tab: '#888888',
     tabW: 0.2,
@@ -120,6 +121,7 @@ export function renderNet(opts) {
     showFolds = true,
     base = 'vector',
     china = true,
+    pxPerMm = 4,
   } = opts;
   const [W0, H0] = PAGES[page] || PAGES.A4;
   const c = { ...(THEME[style] || THEME.color), ...(opts.theme || {}) };
@@ -226,7 +228,7 @@ export function renderNet(opts) {
   // skyVersion bumps once the star JSON lands: without it the first render
   // after switching to the sky base caches an empty sheet (data still in
   // flight) and every later render reuses that empty entry.
-  const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}|${skyVersion}`;
+  const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}|${skyVersion}|${rasterVersion}|${pxPerMm}`;
   let layers = layerCache.get(layerKey);
   if (!layers) {
     layers = {
@@ -234,6 +236,7 @@ export function renderNet(opts) {
       dChina: base === 'vector' && china ? geo(chinaFeature) || '' : '',
       dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
       dSky: base === 'sky' ? skyLayers(geo, proj) : '',
+      raster: base === 'raster' && rasterSource ? rasterizeFaces(net, P, proj, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource) : null,
     };
     // Never memoise a render that ran before the sky data arrived; the next
     // one has to redo it.
@@ -243,7 +246,7 @@ export function renderNet(opts) {
       layerCache.set(layerKey, layers);
     }
   }
-  const { dLand, dChina, dGrat, dSky } = layers;
+  const { dLand, dChina, dGrat, dSky, raster } = layers;
 
   const skyPaths = base === 'sky'
     ? [
@@ -259,13 +262,21 @@ export function renderNet(opts) {
     : '';
 
   const label = `${solid.name} · ${net.faceCount} 面 · ${page} · ${style === 'color' ? '彩色' : '单色'}`;
+
+  // The rasterised bitmap spans the page; netclip trims it to the faces.
+  const rasterImage = raster
+    ? `<image x="${raster.box.x}" y="${raster.box.y}" width="${raster.box.w}" height="${raster.box.h}" ` +
+      `href="${raster.dataUrl}" preserveAspectRatio="none" opacity="${c.rasterOpacity}"/>`
+    : '';
+
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,
     `<defs><clipPath id="netclip" clip-rule="evenodd"><path d="${dFaces}" clip-rule="evenodd" fill-rule="evenodd"/></clipPath></defs>`,
     `<rect width="${W}" height="${H}" fill="${c.page}"/>`,
-    base === 'sky' ? '' : `<path d="${dFaces}" fill="${c.face}"/>`,
+    base === 'sky' || base === 'raster' ? '' : `<path d="${dFaces}" fill="${c.face}"/>`,
     dTabs ? `<path d="${dTabs}" fill="${c.tabFill}" stroke="${c.tab}" stroke-width="${c.tabW}"/>` : '',
     `<g clip-path="url(#netclip)">`,
+    rasterImage,
     dGrat ? `<path d="${dGrat}" fill="none" stroke="${c.grat}" stroke-width="${c.gratW}"/>` : '',
     `<path d="${dLand}" fill="${c.land}" stroke="${c.coast}" stroke-width="0.1"/>`,
     `<path d="${dChina}" fill="${c.china}" stroke="${c.coast}" stroke-width="0.12"/>`,
@@ -286,6 +297,24 @@ export function renderNet(opts) {
 // (https://ofrohn.github.io/data, mirrored under src/data/sky).
 // Returns bare path strings; the palette is applied by the caller so colour
 // changes never re-run the projection.
+// Blue Marble equirectangular source, loaded once on demand.
+let rasterSource = null;
+let rasterVersion = 0;
+export async function loadRasterData() {
+  if (rasterSource) return rasterSource;
+  const url = new URL('../data/sky/blue-marble-2048.jpg', import.meta.url).href;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = () => reject(new Error('栅格底图加载失败: ' + url));
+    img.src = url;
+  });
+  rasterSource = imageToSource(img);
+  rasterVersion++;
+  return rasterSource;
+}
+
 let skyData = null;
 // Bumped when the star data lands, so cached layers built before that are
 // recomputed instead of being served empty.
