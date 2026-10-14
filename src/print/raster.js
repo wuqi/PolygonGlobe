@@ -1,122 +1,30 @@
 // Blue Marble on a polyhedral net.
 //
-// The source is an equirectangular photo, so the naive route - for every output
-// pixel ask the projection which lon/lat lands there - is far too slow: the
-// polyhedral projection's invert() does a tree lookup per point (measured at
-// ~144us, i.e. minutes for one A4 sheet). Projecting forwards is ~0.4us per
-// point when done per face through node.project, which skips the lookup.
+// The source is an equirectangular photo, so the honest way to fill a sheet is
+// to walk output pixels and ask which lon/lat each one is. d3-geo-polygon's own
+// invert() does that with a recursive tree walk that tries every face's
+// projection in turn - correct, but ~144us a pixel, i.e. minutes per A4 sheet.
 //
-// So: walk a lon/lat grid over each face's own spherical region, project the
-// cell corners into that face's plane, and fill the resulting quad with the
-// source colour at the cell centre. The whole page ends up as one bitmap that
-// the sheet's existing netclip path trims to the faces.
+// Two things make it affordable. Each face is a gnomonic projection centred on
+// its Voronoi site, and d3's geoGnomonic has an analytic inverse, so one face
+// can be inverted with closed-form arithmetic instead of a search. And each
+// face's planar footprint is a quadrilateral we already know, so a pixel only
+// tries the faces whose bounding box contains it.
+//
+// The result agrees with the reference implementation (see scripts/diag-raster3
+// .mjs, which compares against d3's invert) to within a rounding step.
 
-const DEFAULT_STEP = 1; // degrees per cell
+import { geoRotation } from 'd3-geo';
 
-// Unwrap a ring's longitudes into one continuous range. A face that straddles
-// the antimeridian comes back as 170, 175, -175, -170 and has to read as
-// 170..190, otherwise the grid would sweep the whole globe.
-function lonRange(ring) {
-  const lats = ring.map((p) => p[1]);
-  if (lats.some((la) => Math.abs(la) > 89.999)) {
-    // Touching a pole, so every meridian meets this face.
-    return [-180, 180];
-  }
-  let acc = ring[0][0];
-  let lo = acc;
-  let hi = acc;
-  for (let i = 1; i < ring.length; i++) {
-    let d = ring[i][0] - ring[i - 1][0];
-    while (d > 180) d -= 360;
-    while (d < -180) d += 360;
-    acc += d;
-    lo = Math.min(lo, acc);
-    hi = Math.max(hi, acc);
-  }
-  return [lo, hi];
+const RAD = Math.PI / 180;
+
+// Unit vector for a lon/lat, for cheap great-circle comparison.
+function lonLatVec(ll) {
+  const a = ll[1] * RAD;
+  const o = ll[0] * RAD;
+  const c = Math.cos(a);
+  return [c * Math.cos(o), c * Math.sin(o), Math.sin(a)];
 }
-
-export function faceRegion(node) {
-  const [lo, hi] = lonRange(node.face);
-  const lat0 = Math.min(...node.face.map((p) => p[1]));
-  const lat1 = Math.max(...node.face.map((p) => p[1]));
-  return { lo, hi, lat0, lat1 };
-}
-
-// A face ring cannot be trusted to describe the face's lon/lat footprint:
-// d3-geo-polygon's cube defines its north cell as four points all sitting on
-// one parallel, so the ring has zero latitude span and would yield an empty
-// grid. Sample the face's interior through the inverse projection instead -
-// a handful of calls per face, which is affordable even though invert() costs
-// ~144us a point.
-function regionFromInterior(proj, poly, extra, step) {
-  const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length;
-  const cy = poly.reduce((a, p) => a + p[1], 0) / poly.length;
-  const probes = [[cx, cy]];
-  for (const p of poly) probes.push([cx + (p[0] - cx) * 0.8, cy + (p[1] - cy) * 0.8]);
-
-  const lons = [];
-  const lats = [];
-  let probeLon = 0;
-  let probeLat = 0;
-  let probeN = 0;
-  for (const q of probes) {
-    const ll = proj.invert(q);
-    if (ll && Number.isFinite(ll[0]) && Number.isFinite(ll[1])) {
-      lons.push(ll[0]);
-      lats.push(ll[1]);
-      probeLon += ll[0];
-      probeLat += ll[1];
-      probeN++;
-    }
-  }
-  for (const p of extra) {
-    lons.push(p[0]);
-    lats.push(p[1]);
-  }
-  if (!lons.length) return null;
-  if (probeN) {
-    probeLon /= probeN;
-    probeLat /= probeN;
-  } else {
-    probeLon = lons[0];
-    probeLat = lats[0];
-  }
-
-  let lo = Infinity;
-  let hi = -Infinity;
-  let acc = lons[0];
-  lo = hi = acc;
-  for (let i = 1; i < lons.length; i++) {
-    let d = lons[i] - lons[i - 1];
-    while (d > 180) d -= 360;
-    while (d < -180) d += 360;
-    acc += d;
-    lo = Math.min(lo, acc);
-    hi = Math.max(hi, acc);
-  }
-
-  // A face that reaches far in longitude is a polar one; every meridian
-  // crosses it, so the grid has to sweep the whole circle.
-  if (hi - lo > 180) {
-    lo = -180;
-    hi = 180;
-  }
-  return {
-    lo: lo - step,
-    hi: hi + step,
-    lat0: Math.min(...lats) - step,
-    lat1: Math.max(...lats) + step,
-    probeLon,
-    probeLat,
-  };
-}
-
-const wrapLon = (lon) => {
-  if (lon >= -180 && lon <= 180) return lon;
-  let x = ((lon + 180) % 360 + 360) % 360 - 180;
-  return x === -180 ? 180 : x;
-};
 
 function pointInRing(pt, ring) {
   let inside = false;
@@ -132,110 +40,153 @@ function pointInRing(pt, ring) {
   return inside;
 }
 
+// Everything needed to turn a page point into lon/lat for one face.
+function faceSolver(net, node, k, tx, ty) {
+  const site = node.site || node.centroid;
+
+  // net.js maps a point with
+  //   p    = gp(lonlat)
+  //   q    = t ? [t0*p0+t1*p1+t2, -(t3*p0+t4*p1+t5)] : [p0, -p1]
+  //   net  = R * (q - c),  R = [[cosA,-sinA],[-sinA,-cosA]]
+  //   page = [tx,ty] + k * net
+  // so inverting means undoing the planar step as well - and the y negation
+  // applies even when the node carries no transform.
+  let m00 = 1;
+  let m01 = 0;
+  let m10 = 0;
+  let m11 = -1;
+  let b0 = 0;
+  let b1 = 0;
+  if (node.transform) {
+    const t = node.transform;
+    m00 = t[0];
+    m01 = t[1];
+    m10 = -t[3];
+    m11 = -t[4];
+    b0 = t[2];
+    b1 = -t[5];
+  }
+  const det = m00 * m11 - m01 * m10;
+  const ring = node.face;
+  const poly = ring.map((ll) => {
+    const q = net.pt(node, ll);
+    return [tx + q[0] * k, ty + q[1] * k];
+  });
+  return {
+    // The face's own projection, whose invert() is analytic for every face
+    // type - gnomonic for the voronoi solids, Lee's raw projection for the
+    // tetrahedral one. Reusing it avoids assuming a particular face projection.
+    gp: node.project,
+    ring,
+    siteVec: lonLatVec(site),
+    pageRing: poly,
+    inv: det
+      ? { a: m11 / det, b: -m01 / det, c: -m10 / det, d: m00 / det }
+      : null,
+    b0,
+    b1,
+    x0: Math.min(...poly.map((p) => p[0])),
+    x1: Math.max(...poly.map((p) => p[0])),
+    y0: Math.min(...poly.map((p) => p[1])),
+    y1: Math.max(...poly.map((p) => p[1])),
+  };
+}
+
+/** A page-millimetres -> [lon, lat] function; null outside every face. */
+export function makeInverse(net, page) {
+  const { k, tx, ty } = page;
+  const { rcx, rcy, cosA, sinA } = net.xf;
+  const faces = net.nodes.map((n) => faceSolver(net, n, k, tx, ty)).filter((f) => f.inv);
+  // The face geometry - and so the gnomonic each face uses - lives in the
+  // projection's rotated frame; the projection's rotate is applied before the
+  // face projection runs. Undo it to get geographic lon/lat.
+  const rotInvert = geoRotation(net.proj.rotate()).invert;
+  // Largest faces first: they win the overlap test more often, letting a pixel
+  // stop at the first hit.
+  faces.sort((a, b) => (b.x1 - b.x0) * (b.y1 - b.y0) - (a.x1 - a.x0) * (a.y1 - a.y0));
+
+  return function invertPage(pageX, pageY) {
+    const netX = (pageX - tx) / k;
+    const netY = (pageY - ty) / k;
+    // R has determinant -1 and squares to the identity, so it is its own inverse.
+    const qx = rcx + cosA * netX - sinA * netY;
+    const qy = rcy - sinA * netX - cosA * netY;
+
+    // Which face owns a lon/lat is decided by the nearest Voronoi site, exactly
+    // as the library's own find() does. Testing "inside the ring" in lon/lat
+    // would be wrong: a face ring can be four points on one parallel, which on
+    // the sphere bounds a polar cap rather than a polygon. The planar polygon
+    // does the exact test, in the space the sheet is actually drawn in.
+    let best = null;
+    let bestDot = -Infinity;
+    for (const f of faces) {
+      if (pageX < f.x0 || pageX > f.x1 || pageY < f.y0 || pageY > f.y1) continue;
+      if (!pointInRing([pageX, pageY], f.pageRing)) continue;
+      const p0 = f.inv.a * (qx - f.b0) + f.inv.b * (qy - f.b1);
+      const p1 = f.inv.c * (qx - f.b0) + f.inv.d * (qy - f.b1);
+      const ll = f.gp.invert([p0, p1]);
+      if (!ll || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) continue;
+      if (ll[1] > 90 || ll[1] < -90) continue;
+      // Nearest-site comparison happens in the rotated frame, where the sites
+      // are defined; the rotation is undone only for the returned value.
+      const v = lonLatVec(ll);
+      const s = f.siteVec;
+      const dot = v[0] * s[0] + v[1] * s[1] + v[2] * s[2];
+      if (dot <= bestDot) continue;
+      const geo = rotInvert(ll);
+      if (!geo || !Number.isFinite(geo[0]) || !Number.isFinite(geo[1])) continue;
+      bestDot = dot;
+      best = [((geo[0] + 180) % 360 + 360) % 360 - 180, geo[1]];
+    }
+    return best;
+  };
+}
+
 /**
  * Rasterise the whole page.
  * @param net      from buildNet
- * @param P        net-space point -> page millimetres
+ * @param page     { k, tx, ty } the net->page fit, matching P in renderNet
  * @param box      { x, y, w, h } page rect the bitmap covers
  * @param pxPerMm  bitmap resolution
  * @param source   { data, width, height } RGBA of the equirectangular image
  */
-export function rasterizeFaces(net, P, proj, box, pxPerMm, source, opts = {}) {
-  const step = opts.step ?? DEFAULT_STEP;
-  const w = Math.max(1, Math.round(box.w * pxPerMm));
-  const h = Math.max(1, Math.round(box.h * pxPerMm));
+export function rasterizeFaces(net, page, box, pxPerMm, source, opts = {}) {
+  const { w, h } = box;
+  const pxW = Math.max(1, Math.round(w * pxPerMm));
+  const pxH = Math.max(1, Math.round(h * pxPerMm));
   const canvas = opts.canvas || document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: false });
-  ctx.clearRect(0, 0, w, h);
+  canvas.width = pxW;
+  canvas.height = pxH;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(pxW, pxH);
+  const out = img.data;
 
+  const invertPage = makeInverse(net, page);
   const { data, width: sw, height: sh } = source;
-  const sx = w / box.w; // page px per mm
-  const toX = (pageX) => (pageX - box.x) * sx;
-  const toY = (pageY) => (pageY - box.y) * sx;
 
-  let cells = 0;
-  let painted = 0;
-
-  for (const node of net.nodes) {
-    // The face's outline in page millimetres, used to reject cells that
-    // belong to a neighbouring face (node.project extrapolates happily).
-    const poly = node.face.map((ll) => P(net.pt(node, ll)));
-    const region = regionFromInterior(proj, poly, node.face, step);
-    if (!region) continue;
-    const { lo, hi, lat0, lat1 } = region;
-
-    // Map lon/lat into this face's plane and on to page millimetres. Reuse
-    // net.pt so the frame compensation the net was built with is applied
-    // identically here - projecting straight through node.project would land
-    // in a different space and every point-in-polygon test would fail.
-    const project = (lon, lat) => {
-      const p = net.pt(node, [wrapLon(lon), lat]);
-      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
-      return P(p);
-    };
-
-    // Cheap rejection before the exact test: most candidates in a polar face's
-    // 360-degree sweep land nowhere near this face.
-    const bx0 = Math.min(...poly.map((p) => p[0]));
-    const bx1 = Math.max(...poly.map((p) => p[0]));
-    const by0 = Math.min(...poly.map((p) => p[1]));
-    const by1 = Math.max(...poly.map((p) => p[1]));
-
-    // Keep the cell small. A cell is kept only when its centre falls inside the
-    // face, so a large cell straddling the boundary gets dropped whole and
-    // leaves a gap; at a degree or finer the loss is a sub-cell sliver.
-// Resolution is dialled with pxPerMm instead of the angular step.
-const cell = step;
-
-    for (let lat = region.lat0; lat < region.lat1 - 1e-9; lat += cell) {
-      const latA = lat;
-      const latB = Math.min(lat + cell, region.lat1);
-      for (let lon = lo; lon < hi - 1e-9; lon += cell) {
-        const lonA = lon;
-        const lonB = lon + cell;
-        cells++;
-
-        // Reject cells outside this face before touching the canvas.
-        const midLon = lonA + (lonB - lonA) / 2;
-        const midLat = latA + (latB - latA) / 2;
-        const probe = project(midLon, midLat);
-        if (!probe) continue;
-        if (probe[0] < bx0 || probe[0] > bx1 || probe[1] < by0 || probe[1] > by1) continue;
-        if (!pointInRing(probe, poly)) continue;
-
-        const c = [
-          project(lonA, latA),
-          project(lonB, latA),
-          project(lonB, latB),
-          project(lonA, latB),
-        ];
-        if (c.some((q) => !q)) continue;
-
-        // Colour from the source at the cell centre.
-        const u = ((wrapLon(midLon) + 180) / 360) * sw;
-        const v = ((90 - midLat) / 180) * sh;
-        const ix = Math.min(sw - 1, Math.max(0, Math.round(u)));
-        const iy = Math.min(sh - 1, Math.max(0, Math.round(v)));
-        const o = (iy * sw + ix) * 4;
-        if (data[o + 3] === 0) continue;
-        const col = `rgb(${data[o]},${data[o + 1]},${data[o + 2]})`;
-
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        ctx.moveTo(toX(c[0][0]), toY(c[0][1]));
-        ctx.lineTo(toX(c[1][0]), toY(c[1][1]));
-        ctx.lineTo(toX(c[2][0]), toY(c[2][1]));
-        ctx.lineTo(toX(c[3][0]), toY(c[3][1]));
-        ctx.closePath();
-        ctx.fill();
-        painted++;
-      }
+  let hit = 0;
+  for (let py = 0; py < pxH; py++) {
+    const pageY = box.y + (py + 0.5) / pxPerMm;
+    for (let px = 0; px < pxW; px++) {
+      const pageX = box.x + (px + 0.5) / pxPerMm;
+      const ll = invertPage(pageX, pageY);
+      if (!ll) continue;
+      const u = ((ll[0] + 180) / 360) * sw;
+      const v = ((90 - ll[1]) / 180) * sh;
+      const ix = Math.min(sw - 1, Math.max(0, Math.round(u)));
+      const iy = Math.min(sh - 1, Math.max(0, Math.round(v)));
+      const so = (iy * sw + ix) * 4;
+      const o = (py * pxW + px) * 4;
+      out[o] = data[so];
+      out[o + 1] = data[so + 1];
+      out[o + 2] = data[so + 2];
+      out[o + 3] = 255;
+      hit++;
     }
   }
 
-  return { dataUrl: canvas.toDataURL('image/png'), w, h, box, cells, painted };
+  ctx.putImageData(img, 0, 0);
+  return { dataUrl: canvas.toDataURL('image/png'), w: pxW, h: pxH, box, pixels: hit };
 }
 
 // Turn a loaded image element into raw RGBA the sampler can index.

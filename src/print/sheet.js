@@ -236,7 +236,10 @@ export function renderNet(opts) {
       dChina: base === 'vector' && china ? geo(chinaFeature) || '' : '',
       dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
       dSky: base === 'sky' ? skyLayers(geo, proj) : '',
-      raster: base === 'raster' && rasterSource ? rasterizeFaces(net, P, proj, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource) : null,
+      raster:
+        base === 'raster' && rasterSource
+          ? rasterizeFaces(net, { k, tx, ty }, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource)
+          : null,
     };
     // Never memoise a render that ran before the sky data arrived; the next
     // one has to redo it.
