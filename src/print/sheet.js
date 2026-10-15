@@ -26,8 +26,8 @@ const THEME = {
     consBoundW: 0.1,
     consLine: '#3f5875',
     consLineW: 0.14,
-    consName: '#5b6f88',
-    consNameSize: 1.1,
+    consName: '#33475c',
+    consNameSize: 1.6,
     star: '#16233a',
     starMax: 0.24,
     overlayFill: 0.25,
@@ -53,8 +53,8 @@ const THEME = {
     consBoundW: 0.1,
     consLine: '#666666',
     consLineW: 0.14,
-    consName: '#8c8c8c',
-    consNameSize: 1.1,
+    consName: '#555555',
+    consNameSize: 1.6,
     star: '#111111',
     starMax: 0.24,
     overlayFill: 0.25,
@@ -267,6 +267,15 @@ export function renderNet(opts) {
           ? `<path d="${dSky.dLines}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`
           : '',
         dSky.dStars ? `<path d="${dSky.dStars}" fill="${c.star}" fill-rule="evenodd"/>` : '',
+        (dSky.names || [])
+          .map(
+            (m) =>
+              `<text x="${m.x.toFixed(1)}" y="${m.y.toFixed(1)}" dy="0.35em" text-anchor="middle" ` +
+              `font-family="sans-serif" font-size="${c.consNameSize}" font-weight="600" ` +
+              `fill="${c.consName}" stroke="${c.page}" stroke-width="${c.consNameSize * 0.12}" ` +
+              `paint-order="stroke" opacity="0.9">${escapeXml(m.text)}</text>`,
+          )
+          .join(''),
       ].join('')
     : '';
 
@@ -333,7 +342,7 @@ let skyData = null;
 // recomputed instead of being served empty.
 let skyVersion = 0;
 function skyLayers(geo, proj) {
-  if (!skyData) return { dMw: '', dBounds: '', dLines: '', dStars: '' };
+  if (!skyData) return { dMw: '', dBounds: '', dLines: '', dStars: '', names: [] };
   const out = { dMw: '', dBounds: '', dLines: '', dStars: '' };
 
   // The Milky Way is drawn as its *complement*: the source polygon reversed,
@@ -350,6 +359,17 @@ function skyLayers(geo, proj) {
   if (skyData.constellationLines) {
     out.dLines = geo(skyData.constellationLines) || '';
   }
+  // Label anchors are cached with the geometry but emitted with the live
+  // colour and size, so moving a colour slider does not re-project them.
+  if (skyData.constellationNames) {
+    const marks = [];
+    for (const f of skyData.constellationNames.features) {
+      const p = proj(f.geometry.coordinates);
+      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) continue;
+      marks.push({ x: p[0], y: p[1], text: f.properties?.desig || f.properties?.name || '' });
+    }
+    out.names = marks;
+  }
   if (skyData.stars) {
     let dots = '';
     for (const f of skyData.stars.features) {
@@ -364,6 +384,9 @@ function skyLayers(geo, proj) {
   }
   return out;
 }
+
+const escapeXml = (s) =>
+  String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]);
 
 // Star radius in mm, from a magnitude scale set at render time.
 let starScale = { max: 0.24, min: 0.05 };
