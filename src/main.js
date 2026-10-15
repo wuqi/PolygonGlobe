@@ -54,6 +54,7 @@ app.innerHTML = `
         <label>底图</label>
         <button class="seg" data-base="vector">矢量</button>
         <button class="seg" data-base="raster">栅格</button>
+        <button class="seg" data-base="both">叠加</button>
         <button class="seg" data-base="sky">星图</button>
       </div>
       <div class="grp">
@@ -415,7 +416,7 @@ document.querySelectorAll('[data-base]').forEach((b) => {
         alert('星图数据加载失败');
       }
     }
-    if (base === 'raster' && !rasterRequested) {
+    if ((base === 'raster' || base === 'both') && !rasterRequested) {
       rasterRequested = true;
       try {
         await loadRasterData();

@@ -30,7 +30,8 @@ const THEME = {
     consNameSize: 1.1,
     star: '#16233a',
     starMax: 0.24,
-    rasterOpacity: 1,
+    overlayFill: 0.25,
+    overlayCoastW: 0.12,
     tabFill: '#ffffff',
     tab: '#7a8ea0',
     tabW: 0.2,
@@ -56,7 +57,8 @@ const THEME = {
     consNameSize: 1.1,
     star: '#111111',
     starMax: 0.24,
-    rasterOpacity: 1,
+    overlayFill: 0.25,
+    overlayCoastW: 0.12,
     tabFill: '#ffffff',
     tab: '#888888',
     tabW: 0.2,
@@ -231,13 +233,17 @@ export function renderNet(opts) {
   const layerKey = `${solid.key}|${page}|${margin}|${base}|${graticule ? 1 : 0}|${china ? 1 : 0}|${c.starMax}|${c.starMin}|${skyVersion}|${rasterVersion}|${pxPerMm}`;
   let layers = layerCache.get(layerKey);
   if (!layers) {
+    // `both` is the raster base with the vector linework drawn over it, so the
+    // same two layers are produced as for `raster` / `vector` respectively.
+    const wantVector = base === 'vector' || base === 'both';
+    const wantRaster = base === 'raster' || base === 'both';
     layers = {
-      dLand: base === 'vector' ? geo({ type: 'FeatureCollection', features: worldFeatures }) || '' : '',
-      dChina: base === 'vector' && china ? geo(chinaFeature) || '' : '',
+      dLand: wantVector ? geo({ type: 'FeatureCollection', features: worldFeatures }) || '' : '',
+      dChina: wantVector && china ? geo(chinaFeature) || '' : '',
       dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
       dSky: base === 'sky' ? skyLayers(geo, proj) : '',
       raster:
-        base === 'raster' && rasterSource
+        wantRaster && rasterSource
           ? rasterizeFaces(net, { k, tx, ty }, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource)
           : null,
     };
@@ -272,16 +278,20 @@ export function renderNet(opts) {
       `href="${raster.dataUrl}" preserveAspectRatio="none" opacity="${c.rasterOpacity}"/>`
     : '';
 
+  // Over the raster the land fill has to get out of the way, so it is drawn
+  // semi-transparent and the coastline carries the linework on its own.
+  const landOpacity = base === 'both' ? c.overlayFill : 1;
+
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">`,
     `<defs><clipPath id="netclip" clip-rule="evenodd"><path d="${dFaces}" clip-rule="evenodd" fill-rule="evenodd"/></clipPath></defs>`,
     `<rect width="${W}" height="${H}" fill="${c.page}"/>`,
-    base === 'sky' || base === 'raster' ? '' : `<path d="${dFaces}" fill="${c.face}"/>`,
+    raster || base === 'sky' ? '' : `<path d="${dFaces}" fill="${c.face}"/>`,
     dTabs ? `<path d="${dTabs}" fill="${c.tabFill}" stroke="${c.tab}" stroke-width="${c.tabW}"/>` : '',
     `<g clip-path="url(#netclip)">`,
     rasterImage,
     dGrat ? `<path d="${dGrat}" fill="none" stroke="${c.grat}" stroke-width="${c.gratW}"/>` : '',
-    `<path d="${dLand}" fill="${c.land}" stroke="${c.coast}" stroke-width="0.1"/>`,
+    `<path d="${dLand}" fill="${c.land}" fill-opacity="${landOpacity}" stroke="${c.coast}" stroke-width="${base === 'both' ? c.overlayCoastW : 0.1}"/>`,
     `<path d="${dChina}" fill="${c.china}" stroke="${c.coast}" stroke-width="0.12"/>`,
     skyPaths,
     `</g>`,
