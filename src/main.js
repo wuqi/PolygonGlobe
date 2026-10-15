@@ -13,6 +13,7 @@ const state = {
   base: 'vector',
   graticule: false,
   folds: true,
+  names: true,
   china: true,
   // Overrides on top of the built-in palette; empty means "use the default".
   theme: {},
@@ -61,6 +62,7 @@ app.innerHTML = `
         <label class="chk"><input type="checkbox" id="china" checked> 中国标红</label>
         <label class="chk"><input type="checkbox" id="grat"> 经纬网</label>
         <label class="chk"><input type="checkbox" id="folds" checked> 折线</label>
+        <label class="chk"><input type="checkbox" id="cons" checked> 星座名</label>
       </div>
       <div class="grp right">
         <button class="btn" id="dl-png">导出 PNG</button>
@@ -125,7 +127,7 @@ document.querySelectorAll('[data-base]').forEach((b) => {
 // The checkbox id is `grat`, but the render option is called `graticule`.
 // Writing to state[id] put the flag in an unused field, so the toggle never
 // reached renderNet and the graticule stayed off.
-for (const [id, field] of [['grat', 'graticule'], ['folds', 'folds'], ['china', 'china']]) {
+for (const [id, field] of [['grat', 'graticule'], ['folds', 'folds'], ['cons', 'names'], ['china', 'china']]) {
   const el = document.querySelector('#' + id);
   if (!el) continue;
   el.addEventListener('change', (e) => {
@@ -306,6 +308,7 @@ function current() {
     state.style,
     state.graticule,
     state.folds,
+    state.names,
     state.base,
     state.china,
     JSON.stringify(state.theme),
@@ -323,6 +326,7 @@ function current() {
       style: state.style,
       graticule: state.graticule,
       showFolds: state.folds,
+      showNames: state.names,
       base: state.base,
       china: state.china,
       theme: state.theme,

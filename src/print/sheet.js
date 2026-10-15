@@ -121,6 +121,7 @@ export function renderNet(opts) {
     margin = 6,
     graticule = false,
     showFolds = true,
+    showNames = true,
     base = 'vector',
     china = true,
     pxPerMm = 4,
@@ -267,15 +268,17 @@ export function renderNet(opts) {
           ? `<path d="${dSky.dLines}" fill="none" stroke="${c.consLine}" stroke-width="${c.consLineW}" stroke-linecap="round"/>`
           : '',
         dSky.dStars ? `<path d="${dSky.dStars}" fill="${c.star}" fill-rule="evenodd"/>` : '',
-        (dSky.names || [])
-          .map(
-            (m) =>
-              `<text x="${m.x.toFixed(1)}" y="${m.y.toFixed(1)}" dy="0.35em" text-anchor="middle" ` +
-              `font-family="sans-serif" font-size="${c.consNameSize}" font-weight="600" ` +
-              `fill="${c.consName}" stroke="${c.page}" stroke-width="${c.consNameSize * 0.12}" ` +
-              `paint-order="stroke" opacity="0.9">${escapeXml(m.text)}</text>`,
-          )
-          .join(''),
+        showNames
+          ? (dSky.names || [])
+              .map(
+                (m) =>
+                  `<text x="${m.x.toFixed(1)}" y="${m.y.toFixed(1)}" dy="0.35em" text-anchor="middle" ` +
+                  `font-family="sans-serif" font-size="${c.consNameSize}" font-weight="600" ` +
+                  `fill="${c.consName}" stroke="${c.page}" stroke-width="${c.consNameSize * 0.12}" ` +
+                  `paint-order="stroke" opacity="0.9">${escapeXml(m.text)}</text>`,
+              )
+              .join('')
+          : '',
       ].join('')
     : '';
 
