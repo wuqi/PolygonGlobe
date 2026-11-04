@@ -159,8 +159,62 @@ function segCross(a, b, c, d) {
   return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
 }
 
+// Net-space bbox of the faces for a given page frame, used by the angle search.
+function faceBBox(nodes, xf) {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const n of nodes) {
+    for (const ll of n.face) {
+      const p = rawToNet(xf, nodePoint(n, ll));
+      if (p[0] < x0) x0 = p[0];
+      if (p[1] < y0) y0 = p[1];
+      if (p[0] > x1) x1 = p[0];
+      if (p[1] > y1) y1 = p[1];
+    }
+  }
+  return [x0, y0, x1, y1];
+}
+
+// Pick the unfold angle (and sheet orientation) that lets the net print the
+// largest. `period` is the rotational symmetry in degrees: rotating the net by
+// that much maps it onto itself, so the scan only needs one period. Mirrors the
+// reference page's bestAngle(): coarse 1 deg sweep, then a 0.1 deg refine.
+function bestUnfold(proj, nodes, period, page, margin) {
+  const orientations = [
+    [page[0], page[1]],
+    [page[1], page[0]],
+  ];
+  let best = null;
+  for (const [W, H] of orientations) {
+    const score = (a) => {
+      proj.angle(a);
+      const xf = solveFrame(proj, nodes[0]);
+      const [x0, y0, x1, y1] = faceBBox(nodes, xf);
+      const bw = x1 - x0;
+      const bh = y1 - y0;
+      if (!(bw > 0) || !(bh > 0)) return -Infinity;
+      return Math.min((W - 2 * margin) / bw, (H - 2 * margin) / bh);
+    };
+    const wrap = (a) => ((a % period) + period) % period;
+    let local = { s: -1, a: 0 };
+    for (let a = 0; a < period; a += 1) {
+      const s = score(a);
+      if (s > local.s) local = { s, a };
+    }
+    for (let a = local.a - 1; a <= local.a + 1; a += 0.1) {
+      const s = score(wrap(a));
+      if (s > local.s) local = { s, a: wrap(a) };
+    }
+    if (!best || local.s > best.s) best = { s: local.s, a: local.a, W, H };
+  }
+  proj.angle(best.a);
+  return { angle: best.a, orientation: best.W <= best.H ? 'portrait' : 'landscape' };
+}
+
 /** Build the net for a solid definition. Returns geometry plus a health report. */
-export function buildNet(solid, { scale = 100 } = {}) {
+export function buildNet(solid, { scale = 100, page = [210, 297], margin = 6 } = {}) {
   const { faces, parents, sites, rotate, angle } = resolve(solid);
 
   let proj;
@@ -188,6 +242,14 @@ export function buildNet(solid, { scale = 100 } = {}) {
   }
 
   const nodes = collectNodes(proj);
+
+  // Solids flagged with their rotational symmetry get the best-angle sweep.
+  let orientation = null;
+  if (solid.autoAngle) {
+    const picked = bestUnfold(proj, nodes, solid.autoAngle, page, margin);
+    orientation = picked.orientation;
+  }
+
   const xf = solveFrame(proj, nodes[0]);
   const pt = (node, ll) => rawToNet(xf, nodePoint(node, ll));
   const polys = nodes.map((n) => n.face.map((ll) => pt(n, ll)));
@@ -274,6 +336,8 @@ export function buildNet(solid, { scale = 100 } = {}) {
     folds: foldCount,
     cuts: cuts.length,
     overlaps,
+    // Chosen by the best-angle sweep, or null when the solid has no symmetry hint.
+    orientation,
     expectFolds: polys.length - 1,
     bbox: [[x0, y0], [x1, y1]],
     aspect: (x1 - x0) / (y1 - y0),

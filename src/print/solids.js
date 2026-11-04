@@ -201,6 +201,9 @@ const deltoidal24 = {
     [-2.32321, 4.016225], [-44.11012, 10.130068], [-47.469512, 51.922495], [15.066974, 42.947882],
   ],
   parents: [-1, 0, 1, 2, 0, 0, 1, 1, 2, 2, 3, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18],
+  // The flower net has 4-fold symmetry, so only 90 degrees of unfold need
+  // searching. This is what makes the sheet fill the page at any rotation.
+  autoAngle: 90,
 };
 
 // --- pentakis dodecahedron: 60 triangles (from observable notebook 881a8431)

@@ -129,7 +129,7 @@ export function renderNet(opts) {
   const [W0, H0] = PAGES[page] || PAGES.A4;
   const c = { ...(THEME[style] || THEME.color), ...(opts.theme || {}) };
 
-  const net = buildNet(solid);
+  const net = buildNet(solid, { page: [W0, H0], margin });
 
   // Glue tabs live in net space so they can be tested against the faces, then
   // ride through the same page transform as everything else.
@@ -164,7 +164,15 @@ export function renderNet(opts) {
   // (portrait) reads better turned, but since nothing is rotated, just hand it
   // the orientation that wastes least paper: wide nets get the landscape sheet.
   const netAspect = (x1 - x0) / (y1 - y0);
-  const [W, H] = netAspect > 1 ? [H0, W0] : [W0, H0];
+  // Solids that ran the best-angle sweep already chose the sheet orientation
+  // that maximises the printed net; otherwise fall back to the aspect heuristic.
+  const [W, H] = net.orientation
+    ? net.orientation === 'landscape'
+      ? [H0, W0]
+      : [W0, H0]
+    : netAspect > 1
+      ? [H0, W0]
+      : [W0, H0];
 
   const bw = x1 - x0;
   const bh = y1 - y0;
