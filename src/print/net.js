@@ -161,7 +161,7 @@ function segCross(a, b, c, d) {
 
 /** Build the net for a solid definition. Returns geometry plus a health report. */
 export function buildNet(solid, { scale = 100 } = {}) {
-  const { faces, parents, rotate, angle } = resolve(solid);
+  const { faces, parents, sites, rotate, angle } = resolve(solid);
 
   let proj;
   if (solid.make) {
@@ -172,9 +172,9 @@ export function buildNet(solid, { scale = 100 } = {}) {
   } else {
     const polygons = {
       type: 'FeatureCollection',
-      features: faces.map((face) => ({
+      features: faces.map((face, i) => ({
         type: 'Feature',
-        properties: {},
+        properties: sites && sites[i] ? { sitecoordinates: sites[i] } : {},
         geometry: { type: 'Polygon', coordinates: [[...face, face[0]]] },
       })),
     };
