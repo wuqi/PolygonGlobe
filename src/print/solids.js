@@ -8,11 +8,12 @@
 //
 // To add a solid, append an entry to SOLIDS. Nothing else needs to change.
 
-import { geoCentroid, geoInterpolate } from 'd3-geo';
+import { geoCentroid, geoGnomonic, geoInterpolate } from 'd3-geo';
 import {
   geoCubic,
   geoDodecahedral,
   geoIcosahedral,
+  geoPolyhedral,
   geoPolyhedralButterfly,
   geoTetrahedralLee,
 } from 'd3-geo-polygon';
@@ -251,6 +252,213 @@ const pentakis = {
   angle: 55,
 };
 
+// --- truncated / rectified solids -----------------------------------------
+// These four follow the construction used by the reference print pages: derive
+// unit-sphere vertices, give each face a gnomonic projection scaled by the
+// face-plane distance (so faces of different sizes share edges exactly), and
+// hand an explicit spanning tree to geoPolyhedral. The `parents` arrays were
+// searched offline for a compact, non-overlapping net. `autoAngle` then lets
+// buildNet rotate the net to the angle that fills the sheet best.
+const vAdd = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const vSub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vMul = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const vDot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const vLen = (a) => Math.hypot(a[0], a[1], a[2]);
+const vNorm = (a) => vMul(a, 1 / vLen(a));
+const toLL = (p) => [Math.atan2(p[1], p[0]) * D, Math.asin(p[2]) * D];
+
+// Turns a vertex table into face records (loops on the unit sphere), each with
+// its own gnomonic centered on the face normal and scaled by the face distance.
+function faceMaker(P) {
+  const LL = P.map(toLL);
+  const faces = [];
+  const push = (kind, ids) => {
+    const c = vMul(ids.map((i) => P[i]).reduce(vAdd), 1 / ids.length);
+    // d3 wants the outer ring clockwise seen from outside; flip if it is not.
+    if (vDot(vCross(vSub(P[ids[1]], P[ids[0]]), vSub(P[ids[2]], P[ids[0]])), c) > 0) ids = ids.slice().reverse();
+    const d = vLen(c);
+    const n = vNorm(c);
+    const cll = toLL(n);
+    faces.push({
+      kind,
+      face: ids.map((i) => LL[i]),
+      d,
+      n,
+      project: geoGnomonic().scale(d).translate([0, 0]).rotate([-cll[0], -cll[1]]),
+    });
+  };
+  return { faces, push };
+}
+
+// Selects the vertices sitting on each face plane given by `normals`, ordered
+// around the normal, and pushes them as faces.
+function facesFromNormals(P, normals) {
+  const { faces, push } = faceMaker(P);
+  normals.forEach(([kind, n]) => {
+    const m = Math.max(...P.map((p) => vDot(p, n)));
+    const ids = P.map((p, i) => i).filter((i) => vDot(P[i], n) > m - 1e-9);
+    const ax = Math.abs(n[0]) < 0.6 ? [1, 0, 0] : [0, 1, 0];
+    const e1 = vNorm(vCross(n, ax));
+    const e2 = vCross(n, e1);
+    const ang = (i) => {
+      const r = vSub(P[i], vMul(n, vDot(P[i], n)));
+      return Math.atan2(vDot(r, e2), vDot(r, e1));
+    };
+    push(kind, ids.sort((x, y) => ang(x) - ang(y)));
+  });
+  return faces;
+}
+
+// Wires the faces into geoPolyhedral using the given unfolding tree. The face
+// finder is the reference's: the ray from the centre hits the face whose plane
+// is met furthest out, i.e. argmax dot(q, n) / d.
+function makePolyhedral(faces, parents, root) {
+  const nodes = faces.map((f) => ({ face: f.face, project: f.project, children: [] }));
+  parents.forEach((p, i) => {
+    if (p >= 0) nodes[p].children.push(nodes[i]);
+  });
+  const N = faces.length;
+  return geoPolyhedral(nodes[root], (l, p) => {
+    const x = Math.cos(p);
+    const q = [x * Math.cos(l), x * Math.sin(l), Math.sin(p)];
+    let b = 0;
+    let bv = -9;
+    for (let i = 0; i < N; i++) {
+      const v = vDot(q, faces[i].n) / faces[i].d;
+      if (v > bv) {
+        bv = v;
+        b = i;
+      }
+    }
+    return nodes[b];
+  });
+}
+
+// Truncated octahedron: vertices are the permutations of (0, ±1, ±2); faces are
+// 6 squares (axis normals) and 8 hexagons ((±1, ±1, ±1) normals).
+function truncatedOctaFaces() {
+  const base = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  const verts = [];
+  base.forEach((q) => {
+    for (const s1 of [1, -1]) for (const s2 of [1, -1]) {
+      let k = 0;
+      verts.push(q.map((x) => (x ? x * [s1, s2][k++] : 0)));
+    }
+  });
+  const normals = [];
+  for (let a = 0; a < 3; a++) for (const s of [1, -1]) {
+    const n = [0, 0, 0];
+    n[a] = s;
+    normals.push(['sq', n]);
+  }
+  for (const x of [1, -1]) for (const y of [1, -1]) for (const z of [1, -1]) normals.push(['hex', vNorm([x, y, z])]);
+  return facesFromNormals(verts.map(vNorm), normals);
+}
+const TRUNC_OCTA_PARENTS = [6, 12, 6, 12, 6, 7, -1, 6, 4, 7, 6, 7, 4, 5];
+
+// Truncated icosahedron: icosahedron vertices with each edge split at 1/3; 12
+// pentagons (icosahedron vertices) and 20 hexagons (icosahedron faces).
+function truncatedIcosaFaces() {
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const IV = [];
+  for (const s1 of [1, -1]) for (const s2 of [1, -1]) IV.push([0, s1, s2 * PHI], [s1, s2 * PHI, 0], [s2 * PHI, 0, s1]);
+  const nbr = IV.map((v, i) => IV.map((w, j) => j).filter((j) => j !== i && Math.abs(vLen(vSub(IV[i], IV[j])) - 2) < 1e-6));
+  const vid = {};
+  const P = [];
+  IV.forEach((v, i) => nbr[i].forEach((j) => {
+    vid[i + '-' + j] = P.length;
+    P.push(vNorm(vAdd(v, vMul(vSub(IV[j], v), 1 / 3))));
+  }));
+  const { faces, push } = faceMaker(P);
+  IV.forEach((v, i) => {
+    const n = vNorm(v);
+    const ax = Math.abs(n[0]) < 0.6 ? [1, 0, 0] : [0, 1, 0];
+    const e1 = vNorm(vCross(n, ax));
+    const e2 = vCross(n, e1);
+    const ang = (j) => {
+      const d = vSub(IV[j], v);
+      return Math.atan2(vDot(d, e2), vDot(d, e1));
+    };
+    push('pent', nbr[i].slice().sort((a, b) => ang(a) - ang(b)).map((j) => vid[i + '-' + j]));
+  });
+  for (let a = 0; a < 12; a++) for (const b of nbr[a]) for (const c of nbr[b]) {
+    if (a < b && b < c && nbr[a].includes(c)) {
+      push('hex', [vid[a + '-' + b], vid[b + '-' + a], vid[b + '-' + c], vid[c + '-' + b], vid[c + '-' + a], vid[a + '-' + c]]);
+    }
+  }
+  return faces;
+}
+const TRUNC_ICOSA_PARENTS = [
+  12, 17, 20, 22, 25, 29, 28, 29, 21, 27, 30, 22, 1, 7, 2, 6, 5, 19, 7, 3, 21, 4, 18, 3, 11, 10, 8, 4, 25, -1, 29, 10,
+];
+
+// Rhombicuboctahedron: vertices are the permutations of (±1, ±1, ±1+√2); faces
+// are 6 axial squares, 12 edge squares and 8 triangles.
+function rhombicuboctaFaces() {
+  const A1 = 1 + Math.SQRT2;
+  const signs = [
+    [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
+    [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
+  ];
+  const verts = [];
+  for (const q of [[1, 1, A1], [1, A1, 1], [A1, 1, 1]]) for (const sg of signs) verts.push(q.map((x, i) => x * sg[i]));
+  const normals = [];
+  for (let k = 0; k < 3; k++) for (const s of [1, -1]) {
+    const n = [0, 0, 0];
+    n[k] = s;
+    normals.push(['sq', n]);
+  }
+  for (let k = 0; k < 3; k++) {
+    const i = (k + 1) % 3;
+    for (const s1 of [1, -1]) for (const s2 of [1, -1]) {
+      const n = [0, 0, 0];
+      n[k] = s1;
+      n[i] = s2;
+      normals.push(['esq', vNorm(n)]);
+    }
+  }
+  for (const x of [1, -1]) for (const y of [1, -1]) for (const z of [1, -1]) normals.push(['tri', vNorm([x, y, z])]);
+  return facesFromNormals(verts.map(vNorm), normals);
+}
+const RHOMBICUBOCTA_PARENTS = [-1, 9, 6, 7, 12, 16, 0, 0, 2, 3, 18, 5, 20, 21, 0, 24, 0, 1, 6, 16, 7, 7, 10, 8, 12, 9];
+
+// Icosidodecahedron: midpoints of the icosahedron's 30 edges; faces are 12
+// pentagons (icosahedron vertices) and 20 triangles (icosahedron faces).
+function icosidodecaFaces() {
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const IV = [];
+  for (const s1 of [1, -1]) for (const s2 of [1, -1]) IV.push([0, s1, s2 * PHI], [s1, s2 * PHI, 0], [s2 * PHI, 0, s1]);
+  const nbr = IV.map((v, i) => IV.map((w, j) => j).filter((j) => j !== i && Math.abs(vLen(vSub(IV[i], IV[j])) - 2) < 1e-6));
+  const verts = [];
+  for (let i = 0; i < 12; i++) for (const j of nbr[i]) if (i < j) verts.push(vNorm(vAdd(IV[i], IV[j])));
+  const normals = IV.map((v) => ['pent', vNorm(v)]);
+  for (let a = 0; a < 12; a++) for (const b of nbr[a]) for (const c of nbr[b]) {
+    if (a < b && b < c && nbr[a].includes(c)) normals.push(['tri', vNorm(vAdd(vAdd(IV[a], IV[b]), IV[c]))]);
+  }
+  return facesFromNormals(verts.map(vNorm), normals);
+}
+const ICOSIDODECA_PARENTS = [
+  -1, 12, 12, 22, 25, 16, 15, 16, 17, 31, 30, 30, 0, 0, 0, 0, 0, 2, 7, 1, 2, 2, 7, 3, 3, 6, 4, 10, 5, 7, 5, 10,
+];
+
+const truncOcta = {
+  make: () => makePolyhedral(truncatedOctaFaces(), TRUNC_OCTA_PARENTS, 6),
+  autoAngle: 180,
+};
+const truncIcosa = {
+  make: () => makePolyhedral(truncatedIcosaFaces(), TRUNC_ICOSA_PARENTS, 29),
+  autoAngle: 180,
+};
+const rhombicubocta = {
+  make: () => makePolyhedral(rhombicuboctaFaces(), RHOMBICUBOCTA_PARENTS, 0),
+  autoAngle: 180,
+};
+const icosidodeca = {
+  make: () => makePolyhedral(icosidodecaFaces(), ICOSIDODECA_PARENTS, 0),
+  autoAngle: 180,
+};
+
 // --- projections built from d3-geo-polygon's own factories ----------------
 // These carry their own vertices, unfolding tree, angle and rotation, so they
 // only need `make`; the table-driven path above cannot express them.
@@ -283,6 +491,10 @@ export const SOLIDS = [
   { key: 'rhdodeca', name: '菱形十二面体', en: 'Rhombic Dodecahedron', ...rhombicDodeca },
   { key: 'deltoidal', name: '鸢形六十面体', en: 'Deltoidal Hexecontahedron', ...deltoidal },
   { key: 'deltoidal24', name: '鸢形二十四面体', en: 'Deltoidal Icositetrahedron', ...deltoidal24 },
+  { key: 'truncOcta', name: '截角八面体', en: 'Truncated Octahedron', ...truncOcta },
+  { key: 'truncIcosa', name: '截角二十面体', en: 'Truncated Icosahedron', ...truncIcosa },
+  { key: 'rhombicubocta', name: '小斜方截半立方体', en: 'Rhombicuboctahedron', ...rhombicubocta },
+  { key: 'icosidodeca', name: '截半二十面体', en: 'Icosidodecahedron', ...icosidodeca },
   // TODO(pentakis): the parents table from the source notebook does not match
   // the face order produced here, so geoPolyhedralVoronoi throws. Kept out of
   // the list until the ordering is reconciled.

@@ -181,7 +181,13 @@ function faceBBox(nodes, xf) {
 // largest. `period` is the rotational symmetry in degrees: rotating the net by
 // that much maps it onto itself, so the scan only needs one period. Mirrors the
 // reference page's bestAngle(): coarse 1 deg sweep, then a 0.1 deg refine.
-function bestUnfold(proj, nodes, period, page, margin) {
+const unfoldCache = new Map();
+function bestUnfold(proj, nodes, period, page, margin, cacheKey) {
+  if (cacheKey && unfoldCache.has(cacheKey)) {
+    const hit = unfoldCache.get(cacheKey);
+    proj.angle(hit.angle);
+    return hit;
+  }
   const orientations = [
     [page[0], page[1]],
     [page[1], page[0]],
@@ -210,7 +216,9 @@ function bestUnfold(proj, nodes, period, page, margin) {
     if (!best || local.s > best.s) best = { s: local.s, a: local.a, W, H };
   }
   proj.angle(best.a);
-  return { angle: best.a, orientation: best.W <= best.H ? 'portrait' : 'landscape' };
+  const out = { angle: best.a, orientation: best.W <= best.H ? 'portrait' : 'landscape' };
+  if (cacheKey) unfoldCache.set(cacheKey, out);
+  return out;
 }
 
 /** Build the net for a solid definition. Returns geometry plus a health report. */
@@ -246,7 +254,14 @@ export function buildNet(solid, { scale = 100, page = [210, 297], margin = 6 } =
   // Solids flagged with their rotational symmetry get the best-angle sweep.
   let orientation = null;
   if (solid.autoAngle) {
-    const picked = bestUnfold(proj, nodes, solid.autoAngle, page, margin);
+    const picked = bestUnfold(
+      proj,
+      nodes,
+      solid.autoAngle,
+      page,
+      margin,
+      `${solid.key}|${page.join(',')}|${margin}|${solid.autoAngle}`,
+    );
     orientation = picked.orientation;
   }
 
