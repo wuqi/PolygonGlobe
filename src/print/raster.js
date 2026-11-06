@@ -142,6 +142,84 @@ export function makeInverse(net, page) {
   };
 }
 
+// Some face projections (Lee's tetrahedral one) have no closed-form inverse and
+// solve each point with an iterative Newton search. That is ~50x slower per
+// pixel than the analytic gnomonic faces, which turns an A4 bitmap into a
+// 15+ second freeze. Those maps are smooth, so we can instead invert a coarse
+// grid with the exact solver and bilinearly interpolate between nodes, falling
+// back to the exact inverse on cells that straddle a seam or distort heavily.
+const GRID_STEP = 6; // output pixels between exact inverse samples
+const SLOW_US = 8; // per-sample cost above which the grid path is worth it
+
+// Samples a spread of pixels and reports whether the inverse is expensive.
+function inverseIsSlow(invertPage, box, pxPerMm, pxW, pxH) {
+  const n = 200;
+  const probes = [];
+  for (let i = 0; i < n; i++) {
+    const px = (i * 7919) % pxW;
+    const py = (i * 104729) % pxH;
+    probes.push([box.x + (px + 0.5) / pxPerMm, box.y + (py + 0.5) / pxPerMm]);
+  }
+  for (let i = 0; i < 30; i++) invertPage(probes[i][0], probes[i][1]); // warm up
+  const t0 = performance.now();
+  for (const [x, y] of probes) invertPage(x, y);
+  return (performance.now() - t0) / n > SLOW_US / 1000;
+}
+
+const wrapLon = (d) => ((d % 360) + 540) % 360 - 180;
+
+// Exact inverse on a coarse pixel grid, exposed as a bilinear sampler.
+function buildInverseGrid(invertPage, box, pxPerMm, pxW, pxH) {
+  const G = GRID_STEP;
+  const gw = Math.ceil((pxW - 1) / G) + 2;
+  const gh = Math.ceil((pxH - 1) / G) + 2;
+  const grid = new Array(gw * gh);
+  const pageOf = (px, py) => [box.x + (px + 0.5) / pxPerMm, box.y + (py + 0.5) / pxPerMm];
+
+  for (let j = 0; j < gh; j++) {
+    for (let i = 0; i < gw; i++) {
+      const [x, y] = pageOf(i * G, j * G);
+      grid[j * gw + i] = invertPage(x, y);
+    }
+  }
+
+  return function sample(px, py) {
+    const fx = px / G;
+    const fy = py / G;
+    const i = Math.floor(fx);
+    const j = Math.floor(fy);
+    const u = fx - i;
+    const v = fy - j;
+    const a = grid[j * gw + i];
+    const b = grid[j * gw + i + 1];
+    const c = grid[(j + 1) * gw + i];
+    const d = grid[(j + 1) * gw + i + 1];
+    if (!a || !b || !c || !d) {
+      const [x, y] = pageOf(px, py);
+      return invertPage(x, y);
+    }
+    // A big jump means the cell crosses a cut/seam or sits near a pole where
+    // linear interpolation is meaningless; solve those pixels exactly.
+    const jump = Math.max(
+      Math.abs(wrapLon(b[0] - a[0])),
+      Math.abs(wrapLon(c[0] - a[0])),
+      Math.abs(b[1] - a[1]),
+      Math.abs(c[1] - a[1]),
+    );
+    if (jump > 25) {
+      const [x, y] = pageOf(px, py);
+      return invertPage(x, y);
+    }
+    const d0 = wrapLon(b[0] - a[0]);
+    const d1 = wrapLon(d[0] - c[0]);
+    const lonTop = a[0] + d0 * u;
+    const lonBot = c[0] + d1 * u;
+    const latTop = a[1] + (b[1] - a[1]) * u;
+    const latBot = c[1] + (d[1] - c[1]) * u;
+    return [wrapLon(lonTop + (lonBot - lonTop) * v), latTop + (latBot - latTop) * v];
+  };
+}
+
 /**
  * Rasterise the whole page.
  * @param net      from buildNet
@@ -162,14 +240,17 @@ export function rasterizeFaces(net, page, box, pxPerMm, source, opts = {}) {
   const out = img.data;
 
   const invertPage = makeInverse(net, page);
+  // Slow inverses get the interpolated grid; the fast analytic ones stay exact.
+  const sample = inverseIsSlow(invertPage, box, pxPerMm, pxW, pxH)
+    ? buildInverseGrid(invertPage, box, pxPerMm, pxW, pxH)
+    : (px, py) => invertPage(box.x + (px + 0.5) / pxPerMm, box.y + (py + 0.5) / pxPerMm);
+
   const { data, width: sw, height: sh } = source;
 
   let hit = 0;
   for (let py = 0; py < pxH; py++) {
-    const pageY = box.y + (py + 0.5) / pxPerMm;
     for (let px = 0; px < pxW; px++) {
-      const pageX = box.x + (px + 0.5) / pxPerMm;
-      const ll = invertPage(pageX, pageY);
+      const ll = sample(px, py);
       if (!ll) continue;
       const u = ((ll[0] + 180) / 360) * sw;
       const v = ((90 - ll[1]) / 180) * sh;

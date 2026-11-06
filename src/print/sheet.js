@@ -70,6 +70,10 @@ const dOf = (pts, close) => 'M' + pts.map((p) => `${n3(p[0])},${n3(p[1])}`).join
 
 // Projected path strings keyed by everything but colour.
 const layerCache = new Map();
+// The rasterised bitmap keyed independently of the vector base, so switching
+// between "raster" and "both" (or changing colours) reuses it instead of
+// re-projecting every pixel again.
+const rasterCache = new Map();
 
 // Palette entries the UI is allowed to override, in the order they are shown.
 export const THEME_KEYS = [
@@ -251,10 +255,7 @@ export function renderNet(opts) {
       dChina: wantVector && china ? geo(chinaFeature) || '' : '',
       dGrat: graticule ? geo({ type: 'GeometryCollection', geometries: graticuleLines() }) : '',
       dSky: base === 'sky' ? skyLayers(geo, proj) : '',
-      raster:
-        wantRaster && rasterSource
-          ? rasterizeFaces(net, { k, tx, ty }, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource)
-          : null,
+      raster: wantRaster && rasterSource ? rasterFor(net, { k, tx, ty }, W, H, pxPerMm, margin) : null,
     };
     // Never memoise a render that ran before the sky data arrived; the next
     // one has to redo it.
@@ -346,6 +347,18 @@ export async function loadRasterData() {
   rasterSource = imageToSource(img);
   rasterVersion++;
   return rasterSource;
+}
+
+// Memoised so the bitmap is projected once per solid/page/resolution and
+// reused for both the raster and overlay bases (and any colour change).
+function rasterFor(net, page, W, H, pxPerMm, margin) {
+  const key = `${net.key}|${W}x${H}|${margin}|${pxPerMm}|${rasterVersion}`;
+  const hit = rasterCache.get(key);
+  if (hit) return hit;
+  const raster = rasterizeFaces(net, page, { x: 0, y: 0, w: W, h: H }, pxPerMm, rasterSource);
+  if (rasterCache.size > 6) rasterCache.clear();
+  rasterCache.set(key, raster);
+  return raster;
 }
 
 let skyData = null;
