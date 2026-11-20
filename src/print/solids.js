@@ -421,7 +421,11 @@ function rhombicuboctaFaces() {
   for (const x of [1, -1]) for (const y of [1, -1]) for (const z of [1, -1]) normals.push(['tri', vNorm([x, y, z])]);
   return facesFromNormals(verts.map(vNorm), normals);
 }
-const RHOMBICUBOCTA_PARENTS = [-1, 9, 6, 7, 12, 16, 0, 0, 2, 3, 18, 5, 20, 21, 0, 24, 0, 1, 6, 16, 7, 7, 10, 8, 12, 9];
+// Cross-shaped net (reference page): the 8 equatorial squares form one column,
+// each edge-square carries a triangle to left and right, the axial ±x/±y
+// squares carry their mid-latitude edge-squares, and the ±z squares cap the
+// +x axial square. 25 hinges, 23 cuts.
+const RHOMBICUBOCTA_PARENTS = [-1, 8, 6, 7, 14, 16, 0, 0, 2, 3, 2, 2, 3, 3, 0, 1, 0, 1, 6, 6, 7, 7, 8, 8, 9, 9];
 
 // Icosidodecahedron: midpoints of the icosahedron's 30 edges; faces are 12
 // pentagons (icosahedron vertices) and 20 triangles (icosahedron faces).
@@ -438,8 +442,11 @@ function icosidodecaFaces() {
   }
   return facesFromNormals(verts.map(vNorm), normals);
 }
+// Double pinwheel-flower net (reference page): the 32 faces split into a north
+// flower (polar pentagon + 5 petals of triangle→pentagon→triangle) and a south
+// flower, joined by a single hinge. 31 hinges; the wedge gaps are the cuts.
 const ICOSIDODECA_PARENTS = [
-  -1, 12, 12, 22, 25, 16, 15, 16, 17, 31, 30, 30, 0, 0, 0, 0, 0, 2, 7, 1, 2, 2, 7, 3, 3, 6, 4, 10, 5, 7, 5, 10,
+  -1, 13, 12, 24, 26, 15, 14, 16, 17, 23, 27, 31, 0, 0, 0, 0, 0, 2, 3, 1, 4, 2, 7, 8, 9, 6, 9, 9, 10, 11, 5, 9,
 ];
 
 const truncOcta = {
