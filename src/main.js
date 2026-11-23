@@ -6,8 +6,8 @@ import { SOLIDS } from './print/solids.js';
 import { renderNet, loadSkyData, loadRasterData, THEME_KEYS, SKY_KEYS, SKY_WIDTHS, themeOf } from './print/sheet.js';
 
 const state = {
-  polyKey: 'cube',
-  solid: 'cube',
+  polyKey: 'icosa',
+  solid: 'icosa',
   page: 'A4',
   style: 'color',
   base: 'vector',

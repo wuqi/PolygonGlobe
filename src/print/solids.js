@@ -30,34 +30,6 @@ const A3 = (Math.acos(-(1 + Math.sqrt(5)) / Math.sqrt(3) / 2)) * D;
 const mid = (a, b) => geoInterpolate(a, b)(0.5);
 const centroid = (pts) => geoCentroid({ type: 'MultiPoint', coordinates: pts });
 
-// --- tetrahedron: 4 equilateral triangles ------------------------------
-const LAT = -19.47122063449069;
-const tetra = {
-  literalFaces: [
-    [[-180, LAT], [-60, LAT], [60, LAT]],
-    [[0, 90], [60, LAT], [-60, LAT]],
-    [[0, 90], [-60, LAT], [-180, LAT]],
-    [[0, 90], [-180, LAT], [60, LAT]],
-  ],
-  parents: [-1, 0, 1, 2],
-  rotate: [29.999999999999996, 180, 0],
-  angle: 29.999999999999996,
-};
-
-// --- cube: 6 squares ---------------------------------------------------
-const cube = {
-  vertices: [
-    [0, PHI1], [90, PHI1], [180, PHI1], [-90, PHI1],
-    [0, -PHI1], [90, -PHI1], [180, -PHI1], [-90, -PHI1],
-  ],
-  faces: [
-    [0, 3, 2, 1], [0, 1, 5, 4], [1, 2, 6, 5],
-    [2, 3, 7, 6], [3, 0, 4, 7], [4, 5, 6, 7],
-  ],
-  parents: [-1, 0, 1, 5, 3, 2],
-  rotate: [120, 0],
-};
-
 // --- octahedron: 8 triangles -------------------------------------------
 const octa = {
   vertices: [[0, 90], [-90, 0], [0, 0], [90, 0], [180, 0], [0, -90]],
@@ -485,9 +457,7 @@ const dodecaFil = {
 };
 
 export const SOLIDS = [
-  { key: 'tetra', name: '正四面体', en: 'Tetrahedron', ...tetra },
   { key: 'tetraLee', name: '李氏四面体', en: 'Tetrahedral (Lee)', ...tetraLee },
-  { key: 'cube', name: '正方体', en: 'Cube', ...cube },
   { key: 'cubic', name: '立方体(库)', en: 'Cubic (library)', ...cubicLib },
   { key: 'octa', name: '正八面体', en: 'Octahedron', ...octa },
   { key: 'butterfly', name: '蝶形八面体', en: 'Butterfly', ...butterfly },
